@@ -637,8 +637,10 @@ static void *presenter(void *unused) {
                 /* Run 135 (take ~26 ms = slow reads of the decoder buffer): only the shown window (rows 296..751,
                  * columns 240..1679); every 15th frame also the card-detection area (200..990 x 200..1720);
                  * the whole frame for snapshots / zoom / shift / cut-out. detect_ok tells rgba() it may detect. */
-                const int whole=!omx_shown||snap_due||zoom256!=256||shift_up||shift_left||mz_step;
-                const int wide=whole||omx_takes%15==0;
+                /* run 149: a map-zoom step only needs the card area (the wide window), not the whole frame - the
+                 * owner left step -1 on and every frame was de-tiled whole (take ~20 ms, 22.6 fps shown) */
+                const int whole=!omx_shown||snap_due||zoom256!=256||shift_up||shift_left;
+                const int wide=whole||mz_step||omx_takes%15==0;
                 uint64_t t0=us_now(); int took;
                 detect_ok=wide?2:0;
                 took=omxdec_take(mine,whole?0:wide?192:296,whole?1088:wide?1000:752,whole?0:wide?192:240,whole?1920:wide?1728:1680,par_rows);

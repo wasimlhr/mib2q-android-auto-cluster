@@ -43,7 +43,8 @@ public final class AaClusterMenu {
      * res 3 = 1080p, 2 = 720p. Read by the hook (src/uiconfig.c live_dpi / live_res) from the settings file. */
     /* Owner 2026-09-30: three sizes instead of density numbers; the hook maps them per resolution
      * (1080p 1:1: 95 / 110 / 125, 720p: 105 / 120 / 140). */
-    static final String[] SIZE_NAMES = { "", "Small", "Medium", "Large" };
+    /* run 149 (owner photo: wants the bigger, zoomed-in Waze look) -> two larger steps */
+    static final String[] SIZE_NAMES = { "", "Small", "Medium", "Large", "X-Large", "XX-Large" };
     static final int UP_MIN = -60, UP_MAX = 200, UP_STEP = 10;
 
     private static boolean open, edit;
@@ -54,7 +55,7 @@ public final class AaClusterMenu {
     private static int upSmall;            /* Sport (small) view */
     static Boolean testSmallView;
     private static boolean arrow;          /* arrow box in the large map view */
-    private static int size = 2;           /* 1 small, 2 medium (default), 3 large */
+    private static int size = 3;           /* run 154 (owner): Large (125 dpi = the VC panel's physical 125 PPI) is the default */
     /* 2026-09-30: Roller zoom Digital (player enlarges the video) or Map (the hook resizes Google's layout so
      * Google redraws closer, sharp; card pinned by the player). Read by the hook as zoomMode=0/1. */
     /* Run 137 (owner): Digital zoom removed - it enlarged the video (blurry) and dropped the cockpit to ~7 fps.
@@ -153,7 +154,7 @@ public final class AaClusterMenu {
         if (sel == ITEM_UP) {
             edit = !edit;
         } else if (sel == ITEM_SIZE) {
-            size = size % 3 + 1;              /* press cycles Small -> Medium -> Large */
+            size = size % 5 + 1;              /* press cycles Small -> Medium -> Large -> X-Large -> XX-Large */
             save();
         } else if (sel == ITEM_RES) {
             res = res == 3 ? 2 : 3;
@@ -217,7 +218,7 @@ public final class AaClusterMenu {
             up = clamp(intValue(s, "upFull=", 0), UP_MIN, UP_MAX);
             upSmall = clamp(intValue(s, "upSport=", 0) /* run 127: old upSmall=200 pushed the Sport card off the top -> new key, Sport starts at 0 */, UP_MIN, UP_MAX);
             arrow = intValue(s, "arrowBox=", 1) != 0;   /* run 102: new key, default on (hiding left an empty transparent box) */
-            size = clamp(intValue(s, "size=", 2), 1, 3);   /* 2026-09-30: replaces density= (old values ignored) */
+            size = clamp(intValue(s, "size=", 3), 1, 5);   /* 2026-09-30: replaces density= (old values ignored) */
             res = intValue(s, "stream=", 3) == 2 ? 2 : 3;   /* run 108: new keys - the old up=-60 / res= are baked into the defaults */
             theme = clamp(intValue(s, "mapTheme=", 2), 0, 2);
             AaLog.log("menu: settings up=" + up + " upSmall=" + upSmall + " arrow=" + arrow + " size=" + size + " res=" + res);
@@ -312,7 +313,7 @@ public final class AaClusterMenu {
     public static synchronized void setTestSmallView(Boolean small) { testSmallView = small; }
 
     public static synchronized void resetForTest() {
-        open = false; edit = false; sel = 0; seq = 0; up = 0; upSmall = 0; arrow = false; size = 2; res = 3; theme = 2; lastInputMs = 0; selectUntilMs = 0;
+        open = false; edit = false; sel = 0; seq = 0; up = 0; upSmall = 0; arrow = false; size = 3; res = 3; theme = 2; lastInputMs = 0; selectUntilMs = 0;
         loaded = true;
     }
 

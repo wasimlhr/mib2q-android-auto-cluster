@@ -87,10 +87,26 @@ static int ui_theme_sent;
  * (live_relayout_tick re-reads it about once a second). */
 static int ui_theme = UI_THEME;
 static int menu_setting(const char *key, int dflt);
+/* Run 150 (owner): sending ui_theme AUTOMATIC (0) on the cluster display crashed the phone's Android Auto ->
+ * never sent. Menu Auto = the car's own day/night (Luka DayNight writes /tmp/sq5_daynight "SQ5D <0|1>",
+ * 1 = night): Light by day, Dark at night, Dark when unknown. */
+int live_theme_for(int menu, const char *daynight_rec)
+{
+    int night;
+    if (menu == 1 || menu == 2) return menu;
+    if (menu != 0) return (int)UI_THEME;
+    if (daynight_rec && sscanf(daynight_rec, "SQ5D %d", &night) == 1 && (night == 0 || night == 1)) return night ? 2 : 1;
+    return 2;
+}
 static int theme_now(void)
 {
-    int v = menu_setting("mapTheme=", (int)UI_THEME);
-    return v < 0 || v > 2 ? (int)UI_THEME : v;
+    char rec[16] = {0};
+    int menu = menu_setting("mapTheme=", (int)UI_THEME);
+    if (menu == 0) {
+        FILE *f = fopen("/tmp/sq5_daynight", "r");
+        if (f) { if (!fgets(rec, sizeof(rec), f)) rec[0] = 0; fclose(f); }
+    }
+    return live_theme_for(menu, rec);
 }
 
 /* UiConfig body: 0x12 len {content insets}, 0x20 theme (theme dropped when it does not fit in max). */
@@ -138,7 +154,13 @@ static char *heap_copy(const unsigned char *p, unsigned n)
  * so the phone lays its UI out in the centred 1440x540 viewport = the cockpit terminal, shown 1:1 (no scaling).
  * Insets are then in viewport pixels, one preset per cockpit state:
  *   L large map (centred wide), C classic small (two large dials, map centred), S sport small (map on the left). */
-static const uint32_t vp_preset[3][4] = { { 77, 146, 350, 370 } /* right +20: gap before our tile frame at 1081 */, { 77, 146, 510, 510 }, { 78, 146, 580, 490 } };   /* run 125: S +476 = the B9Sport small-stage offset (the Sport panel shows terminal x >= 476) */
+/* Run 149 (owner): the map-zoom step -1 framing is the new default in every view, baked into the presets (the
+ * one-dimension rule of mz_apply: L/C height x223/256 around its centre = top +20 / bottom +21; S width x223/256
+ * around its centre = left/right +24). Was L {77,146,350,370}, C {77,146,510,510}, S {78,146,580,490}. */
+/* Run 153 (owner): the roller "zoom" only resizes Google's layout area (card size / layout), not the map scale
+ * or text - the owner liked Sport at +4 from that base (= the original preset at step +3, width 370 -> 562 around
+ * its centre) -> Sport default. */
+static const uint32_t vp_preset[3][4] = { { 97, 167, 350, 370 } /* right +20: gap before our tile frame at 1081 */, { 97, 167, 510, 510 }, { 78, 146, 484, 394 } };   /* run 125: S +476 = the B9Sport small-stage offset (the Sport panel shows terminal x >= 476) */
 /* Run 117 (owner photos): the phone measures the insets from the FULL 1920x1080 frame, not from the 1440x540
  * viewport (Large card edge at cockpit ~1309 = 1550 - 240) -> add the viewport offset to every preset. */
 #define VP_OX 240u
@@ -366,7 +388,7 @@ void live_relayout_tick(void *sink)
         if (!cur_sink) return;
     }
     ticks++;
-        if (ticks == 15u || ticks % 900u == 0u) off = access("/fs/sda0/sq5_cluster_relayout_off", F_OK) == 0;
+    if (ticks == 15u || ticks % 900u == 0u) off = access("/fs/sda0/sq5_cluster_relayout_off", F_OK) == 0;
     if (off) return;
     if (pending >= 0) {             /* decided on the previous frame, sent after its ack */
         int want = pending;
@@ -433,11 +455,12 @@ int live_dpi(int res)
     /* Owner 2026-09-30: cockpit menu Size (menu.properties "size=1|2|3", default 2 Medium) mapped per resolution.
      * Run 117: 144 at the 1:1 viewport was too big -> Medium 110 (the owner's old 140 look x0.75 = ~105).
      * An SD / unit sq5_cluster_dpi file (one number) still overrides everything. */
-    static const int map1080[4] = { 110, 95, 110, 125 }, map720[4] = { 120, 105, 120, 140 };
-    int size = menu_setting("size=", 2), v, d;
+    /* run 149: Size 1..5 = Small, Medium, Large, X-Large, XX-Large (owner wants the bigger zoomed-in look) */
+    static const int map1080[6] = { 110, 95, 110, 125, 140, 160 }, map720[6] = { 120, 105, 120, 140, 160, 180 };
+    int size = menu_setting("size=", 3), v, d;
     const char *src = "menu size";
     FILE *f;
-    if (size < 1 || size > 3) size = 2;
+    if (size < 1 || size > 5) size = 3;   /* run 154: Large (125 dpi at 1080p = the panel's 125 PPI) */
     d = res == 3 ? map1080[size] : res == 2 ? map720[size] : 160;
     f = fopen("/fs/sda0/sq5_cluster_dpi", "r");
     if (!f) f = fopen("/mnt/app/root/sq5_android_auto/sq5_cluster_dpi", "r");

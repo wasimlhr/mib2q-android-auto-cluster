@@ -43,11 +43,12 @@ int main(void)
      * coordinates (run 117: the phone measures insets from the 1920x1080 frame) = preset + (240 x, 270 y) */
     vp_mode = 1;
     {
-        static const unsigned char want_s[] = { 0x08, V2(78 + 270), 0x10, V2(146 + 270), 0x18, V2(580 + 240),
-                                                0x20, V2(490 + 240), 0x20, 2 };
-        static const unsigned char want_c[] = { 0x08, V2(77 + 270), 0x10, V2(146 + 270), 0x18, V2(510 + 240),
+        /* run 149: the owner's map-zoom step -1 baked into all three presets */
+        static const unsigned char want_s[] = { 0x08, V2(78 + 270), 0x10, V2(146 + 270), 0x18, V2(484 + 240),
+                                                0x20, V2(394 + 240), 0x20, 2 };
+        static const unsigned char want_c[] = { 0x08, V2(97 + 270), 0x10, V2(167 + 270), 0x18, V2(510 + 240),
                                                 0x20, V2(510 + 240), 0x20, 2 };
-        static const unsigned char want_l[] = { 0x08, V2(77 + 270), 0x10, V2(146 + 270), 0x18, V2(350 + 240),
+        static const unsigned char want_l[] = { 0x08, V2(97 + 270), 0x10, V2(167 + 270), 0x18, V2(350 + 240),
                                                 0x20, V2(370 + 240), 0x20, 2 };
         n = live_relayout_message(p, sizeof(p), 2); dump(p, n);
         assert(p[0] == 0x80 && p[1] == 0x09 && !memcmp(p + 6, want_s, sizeof(want_s)));
@@ -63,6 +64,15 @@ int main(void)
         assert(l == 590 && r == 610 && t < t0 && b < b0 && (1080 - b) - t > (1080 - b0 - t0) * 110 / 100);
         assert((int)t0 - (int)t - ((int)b0 - (int)b) <= 1 && (int)t0 - (int)t - ((int)b0 - (int)b) >= -1);
     }
+    /* run 149: L/C presets = the old ones at map-zoom step -1; run 153: Sport = the original at step +3 */
+    {
+        uint32_t t = 77 + 270, b = 146 + 270, l = 350 + 240, r = 370 + 240;
+        mz_step = -1; mz_apply(&t, &b, &l, &r, 0);
+        assert(t == vp_preset[0][0] + VP_OY && b == vp_preset[0][1] + VP_OY && l == vp_preset[0][2] + VP_OX && r == vp_preset[0][3] + VP_OX);
+        t = 78 + 270; b = 146 + 270; l = 580 + 240; r = 490 + 240;
+        mz_step = 3; mz_apply(&t, &b, &l, &r, 2); mz_step = 0;   /* run 153: Sport = the original at step +3 */
+        assert(t == vp_preset[2][0] + VP_OY && b == vp_preset[2][1] + VP_OY && l == vp_preset[2][2] + VP_OX && r == vp_preset[2][3] + VP_OX);
+    }
     /* Sport step -2: only the width shrinks, around its centre */
     {
         uint32_t t = 348, b = 416, l = 820, r = 730, l0 = l, r0 = r;
@@ -74,6 +84,10 @@ int main(void)
     ui_theme = 1; n = live_relayout_message(p, sizeof(p), 0); assert(p[n - 2] == 0x20 && p[n - 1] == 1);
     ui_theme = 0; n = live_relayout_message(p, sizeof(p), 0); assert(p[n - 2] == 0x20 && p[n - 1] == 0);
     ui_theme = UI_THEME;
+    /* run 150: Auto never sends 0 (crashed Android Auto) - it follows the car's day/night: Light / Dark / Dark */
+    assert(live_theme_for(0, "SQ5D 0\n ") == 1 && live_theme_for(0, "SQ5D 1\n ") == 2 && live_theme_for(0, "") == 2);
+    assert(live_theme_for(0, NULL) == 2 && live_theme_for(1, NULL) == 1 && live_theme_for(2, "SQ5D 0\n ") == 2);
+    assert(live_theme_for(7, NULL) == 2 && live_theme_for(-1, NULL) == 2);
     vp_mode = 0;
     /* too small an output buffer is refused */
     assert(live_relayout_message(p, 10, 1) == 0);

@@ -85,13 +85,17 @@ public final class AaClusterMenuTest {
         /* Size: press cycles Small -> Medium -> Large (Medium default); Resolution: press toggles 1080p/720p */
         AaClusterMenu.onRoller(-1, t + 450); AaClusterMenu.onRoller(-1, t + 451);
         check(AaClusterMenu.selection() == 2, "on Size");
-        check(AaClusterMenu.size() == 2 && rec(f).indexOf("Size (on reconnect)\tMedium") > 0, "size Medium by default");
-        AaClusterMenu.onKey(4, 40, 1, t + 452);
-        check(AaClusterMenu.size() == 3 && rec(f).indexOf("Size (on reconnect)\tLarge") > 0, "press -> Large");
+        check(AaClusterMenu.size() == 3 && rec(f).indexOf("Size (on reconnect)\tLarge") > 0, "size Large by default (run 154)");
+        AaClusterMenu.onKey(4, 40, 1, t + 455);
+        check(AaClusterMenu.size() == 4 && rec(f).indexOf("Size (on reconnect)\tX-Large") > 0, "press -> X-Large");
+        AaClusterMenu.onKey(4, 40, 1, t + 457);
+        check(AaClusterMenu.size() == 5 && rec(f).indexOf("Size (on reconnect)\tXX-Large") > 0, "press -> XX-Large");
         AaClusterMenu.onKey(4, 40, 1, t + 460);
         check(AaClusterMenu.size() == 1 && rec(f).indexOf("Size (on reconnect)\tSmall") > 0, "press -> Small (wraps)");
         AaClusterMenu.onKey(4, 40, 1, t + 470);
         check(AaClusterMenu.size() == 2 && !AaClusterMenu.isEdit(), "press -> Medium, no edit mode");
+        AaClusterMenu.onKey(4, 40, 1, t + 480);
+        check(AaClusterMenu.size() == 3, "press -> Large again");
         AaClusterMenu.onRoller(-1, t + 513);
         check(AaClusterMenu.selection() == 3 && AaClusterMenu.res() == 3, "on Resolution, 1080p by default");
         AaClusterMenu.onKey(4, 40, 1, t + 514);

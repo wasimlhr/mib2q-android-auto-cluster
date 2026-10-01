@@ -121,6 +121,7 @@ public final class AaLukaBridge extends DSIAndroidAuto2DefaultListener implement
             boolean lanes = !flag("sq5_lanes_off");
             if (lanes) b.startLanePoller();
             com.sq5.aa.input.AaTouchpadInput.configure(context);
+            DayNight.start(context);   /* run 150: Map theme Auto = the car's day/night -> Light / Dark */
             try {
                 de.audi.app.terminalmode.ITerminalModeConfiguration tc = context.getConfiguration();
                 com.sq5.aa.input.AaRollerInput.configure(tc != null && tc.isKnobDirectionInverted());

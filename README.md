@@ -28,7 +28,8 @@ guidance list. This is not a copy of the centre-screen framebuffer.
 - Qualcomm `OMX.qcom.video.decoder.avc` hardware decoding with automatic FFmpeg fallback.
 - 1440x540 phone viewport presented 1:1 in the Virtual Cockpit.
 - Live Large, Classic and Sport layouts through Android Auto message `0x8009`.
-- Steering-wheel map zoom, cockpit options menu, map theme and UI-size controls.
+- Steering-wheel cockpit options menu with UI size, map theme, arrow tile and map position; the roller
+  adjusts the car position (Large) and card layout (Sport).
 - Turn arrows, distance and lane information in the Virtual Cockpit and HUD.
 - Android Auto cover art, touchpad navigation and parking-popup integration.
 - Feature off switches, conservative installation, log collection and exact uninstall rollback.
@@ -63,21 +64,61 @@ the Android Auto additions in this fork.
 | **Stream** | 1080p at 30 fps, with a 1440×540 viewport shown 1:1 | 720p at 30 fps, scaled | n/a |
 | **Video decoding** | Qualcomm hardware decoder with automatic FFmpeg fallback | Hardware decoder | n/a |
 | **Frames shown** | Approximately 24–27 of the 30 frames sent each second | Not published | n/a |
-| **Sharpness and UI size** | 95/110/125 DPI at 1080p for Small/Medium/Large; 125 DPI matches the cockpit's physical ~125 PPI | Not published | n/a |
+| **Sharpness and UI size** | Five sizes at 1080p: 95/110/125/140/160 DPI (Small to XX-Large). Large, 125 DPI, is the default and matches the cockpit's physical ~125 PPI | Not published | n/a |
 | **Cockpit views** | Large, Classic and Sport, each with its own layout and live switching | Large, Classic and Sport | Guidance overlay follows the supported Audi layouts |
 | **Google card beside Audi's arrow tile** | Yes | Yes | n/a |
 | **HUD** | Turn arrows, distance and lanes | No | Turn arrows and distance from CarPlay |
 | **Cockpit arrow tile** | Turn arrow, street and 16-step distance bars; selectable always-on or Audi-style behavior | Stock Audi tile | Stock Audi tile |
 | **Lane guidance** | Cockpit and HUD | Not published | Yes, from CarPlay |
-| **Steering-wheel menu** | Size, map position, arrow tile, resolution and Day/Night/Auto theme; opens with a two-second hold | No | No |
-| **Day/night map** | Follows the headlights or can be fixed to Day or Night | Not published | n/a |
+| **Steering-wheel menu** | Size, map position, arrow tile, resolution and Day/Night/Auto theme; opens with a two-second hold of the right arrow or the button left of the roller | No | No |
+| **Day/night map** | Fixed Day or Night; Auto (follows the headlights) is in testing | Not published | n/a |
 | **Map roller** | Adjusts car position in Large and card layout in Sport | No zoom | n/a |
 | **MMI touchpad** | Swipes navigate Android Auto menus while handwriting remains available | Not published | Not published |
-| **Album art** | Yes. Android Auto cover art appears in Audi's media screens | Not available | Yes for CarPlay; this implementation builds on LuKa's work |
+| **Album art** | Yes. Android Auto cover art appears in Audi's media screens | Not published | Yes for CarPlay; this implementation builds on LuKa's work |
 | **Navigation apps tested** | Google Maps and Waze | Google Maps | Apple Maps |
 | **Firmware represented here** | MU0918, tested on the car | MU1316 package examined | MU1316 releases; firmware-specific rebuilds may be required |
 | **Installation** | SD card through M.I.B.; automatic logs, audit, off switch and exact uninstall rollback | SD card and rollback package; package observed tied to the vehicle VIN | SD card through M.I.B. |
 | **Price and licence** | Free, GPL-3.0-or-later | Commercial, €100 at the time examined | Free; GPL-3.0 announced upstream and publication permission granted |
+
+### Why 125 DPI
+
+The first-generation Virtual Cockpit panel is 12.3 inches at 1440×540, about 125 pixels per inch. The
+phone's picture is shown 1:1, so at 125 DPI Google's text, icons and lines land on the panel at their
+intended physical size with no rescaling. Larger sizes (140 and 160 DPI) are available for a closer,
+bigger look; they still render natively and stay sharp. Size changes apply on the next phone
+connection.
+
+## Known limits
+
+- **No real map zoom.** Android Auto does not let the car zoom the cockpit map. Resizing the layout
+  area only moves the car (Large) or changes Google's card size and layout (Sport). Map and text scale
+  come from the Size setting.
+- **Frame rate.** The phone sends 30 frames per second and all are decoded in hardware; about 24–27 per
+  second reach the cockpit in normal use.
+- **Settings that need a reconnect.** Size and Resolution are negotiated when the phone connects.
+  Map theme, arrow tile and map position apply live.
+- **Arrow buttons.** Holding the right arrow to open the menu can also open Audi's own side menu,
+  because the cockpit reads that button itself.
+- **Firmware.** Only MU0918 is validated. Other versions need a port; see below.
+
+## FAQ
+
+**Does it work on MHI2 (not MHI2Q)?** No. MHI2 is the older Nvidia-based unit (K-train firmware such
+as `MHI2_US_AUG22_K2162`). This project targets the Qualcomm-based MHI2Q (P-train firmware). The
+hardware video decoder and the Android Auto hook are specific to MHI2Q.
+
+**Does it work on my MHI2Q with different firmware?** Possibly, after a port. Run the read-only
+firmware checker below on files from your unit; it reports whether a validated profile matches.
+
+**CarPlay? MIB3?** No. This project is Android Auto on MHI2Q. For CarPlay turn guidance, see
+[LuKa's upstream project](https://github.com/luka-dev/mib2q-carplay-rgi). MIB3 (2020+) is a different
+platform.
+
+**Wired or wireless Android Auto?** Tested with a wireless adapter. Wired Android Auto uses the same
+receiver path but has not been tested.
+
+**Which navigation apps?** Any app that supports Android Auto's cockpit display. Google Maps and Waze
+are tested.
 
 ## Supported firmware
 
