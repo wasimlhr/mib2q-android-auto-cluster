@@ -17,6 +17,12 @@ This project provides native Android Auto map video, route guidance and HUD inte
 MHI2Q. It was developed and validated on a 2018 B9 SQ5 with `MHI2Q_US_AUG22_P3639`, MU0918 and the
 first-generation Virtual Cockpit.
 
+**The ready-to-install profile in this branch is specifically for MU0918.** The underlying framework
+is intentionally reusable across MHI2Q releases: adapting another version normally means verifying a
+small set of GAL/receiver ABI seams, regenerating the firmware-facing Java seams and adding that
+firmware's hashes to a profile. The stream, decoder, cockpit layouts, HUD integration, controls,
+renderer and installer logic do not need to be reinvented.
+
 The phone creates a real second Android Auto display. It sends an independent H.264 cluster stream on
 channel 64 while the centre display remains available for music, calls, messages or Android Auto's
 guidance list. This is not a copy of the centre-screen framebuffer.
@@ -122,13 +128,40 @@ are tested.
 
 ## Supported firmware
 
-| Firmware | Status |
-| --- | --- |
-| `MHI2Q_US_AUG22_P3639` MU0918 | Validated on the car |
-| Other MHI2Q versions | Port required until their GAL ABI and HMI classes are verified |
+| Firmware | Status | Work required |
+| --- | --- | --- |
+| `MHI2Q_US_AUG22_P3639` MU0918 | **Validated on the car; ready profile included** | Build with the owner's matching firmware JARs, stage and install |
+| Other Audi MHI2Q releases | **Framework-compatible; profile verification required** | Verify the small native/Java seams, add hashes and test on that firmware |
 
-The native hook contains firmware-specific C++ ABI seams. Similar hardware is not enough to make an
-unknown binary safe. Run the checker against files obtained from your own unit:
+### What is already portable
+
+The substantial work is shared by every port:
+
+- Android Auto secondary-display negotiation and channel 64 transport;
+- 1080p/720p stream configuration and live `0x8009` cockpit layouts;
+- Qualcomm H.264 decoding, FFmpeg fallback, bounded frame queue and 1:1 presentation;
+- Large, Classic and Sport viewport logic, steering-wheel controls and menu;
+- Android Auto route-event translation into LuKa's cockpit, lane-guidance and HUD stack;
+- maneuver rendering, album art, touchpad and parking-popup integration;
+- firmware checker, API/member gates, host tests, guarded installer and exact rollback.
+
+### What changes for another firmware
+
+Most MHI2Q adaptations should be a focused compatibility port rather than a new implementation:
+
+1. Run the checker against `gal`, `libautoreceiver.so`, `lsd.jxe` and JARs obtained from that unit.
+2. Confirm the receiver's interposed symbols, C++ object layouts and callback signatures used by the
+   hook. If they match MU0918, the native change may be profile-only.
+3. Regenerate and review the three firmware-facing Android Auto Java seams, then let the build compare
+   every replaced class header and public/protected member with the supplied stock JAR.
+4. Confirm the Virtual Cockpit terminal, window IDs and display contexts, add the firmware hashes and
+   POSIX checksums to a new profile, and run the existing host/on-car validation sequence.
+
+See [porting another firmware](docs/android-auto/firmware-porting.md) for the exact workflow. The
+installer deliberately refuses an unverified version until this short compatibility pass has been
+completed; that refusal protects the head unit and does not imply the framework must be rewritten.
+
+Run the read-only checker against files obtained from the target unit:
 
 ```bash
 python scripts/check_firmware.py \
