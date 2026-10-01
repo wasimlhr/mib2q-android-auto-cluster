@@ -109,6 +109,13 @@ The Android Auto hook also adapts GPL-3.0 work from OneB1t/chopinwong01's
 `mhi2-android-auto-video-vc`. FFmpeg is used under LGPL-2.1-or-later. See
 [`android_auto/THIRD_PARTY.md`](android_auto/THIRD_PARTY.md) and [`LICENSES/README.md`](LICENSES/README.md).
 
+## License
+
+This project is published under GPL-3.0-or-later, with the third-party exceptions and notices described
+in [`LICENSES/README.md`](LICENSES/README.md). LuKa gave written permission on 2026-09-30 to publish and
+distribute these Android Auto modifications as a fork of his project; the repository records the scope
+without publishing the private correspondence or email addresses.
+
 ## Safety boundary
 
 The installer does not replace `gal`, `libautoreceiver.so`, `lsd.jxe` or `gal.json`. It adds an overlay

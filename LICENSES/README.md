@@ -1,6 +1,6 @@
 # Licensing map
 
-There is no single root license asserted over every inherited file in this fork.
+The project is published under GPL-3.0-or-later, subject to the third-party notices below.
 
 - New Android Auto hook, transport, player, installer and tooling under `android_auto/` and the related
   new scripts are offered under GPL-3.0-or-later unless a file says otherwise.
@@ -12,9 +12,10 @@ There is no single root license asserted over every inherited file in this fork.
 - OpenMAX IL headers retain the Khronos notices contained in those files.
 - DejaVu-derived font data retains `android_auto/hook/vendor/LICENSE-DejaVu.txt`.
 - Files inherited from `luka-dev/mib2q-carplay-rgi`, including the shared renderer and portions of the
-  Java/HMI integration, retain LuKa's copyright and upstream history. At the time of this import the
-  upstream repository did not contain a license file; this repository does not relicense that work.
+  Java/HMI integration, retain LuKa's copyright and upstream history. LuKa gave written permission on
+  2026-09-30 to publish and distribute this work as a fork and stated that GPL-3.0 would be added to the
+  upstream repository. See `UPSTREAM-PERMISSION.md`.
 
-Do not publish a binary release containing the inherited LuKa components until the upstream licensing
-terms or written permission cover redistribution. The GitHub fork preserves attribution and history,
-but the fork relationship is not itself a software license.
+Source and binary distributions must preserve the applicable copyright and license notices. A binary
+containing statically linked FFmpeg must also meet the LGPL relinking/source requirements described in
+`android_auto/THIRD_PARTY.md`.
