@@ -120,8 +120,8 @@ firmware checker below on files from your unit; it reports whether a validated p
 [LuKa's upstream project](https://github.com/luka-dev/mib2q-carplay-rgi). MIB3 (2020+) is a different
 platform.
 
-**Wired or wireless Android Auto?** Tested with a wireless adapter. Wired Android Auto uses the same
-receiver path but has not been tested.
+**Wired or wireless Android Auto?** Both have been tested: direct wired USB Android Auto and wireless
+Android Auto through a USB adapter. They use the same receiver and cockpit-stream pipeline.
 
 **Which navigation apps?** Any app that supports Android Auto's cockpit display. Google Maps and Waze
 are tested.

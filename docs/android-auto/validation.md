@@ -4,7 +4,8 @@ Validated configuration:
 
 - Audi B9 SQ5, 2018, first-generation Virtual Cockpit
 - `MHI2Q_US_AUG22_P3639`, MU0918
-- Android Auto through a wireless USB adapter
+- direct wired USB Android Auto
+- wireless Android Auto through a USB adapter
 - Google Maps and Waze
 
 Confirmed behavior:
