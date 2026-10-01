@@ -82,32 +82,11 @@ static unsigned insets(unsigned char *in, uint32_t t, uint32_t b, uint32_t l, ui
 }
 
 static int ui_theme_sent;
-/* Owner 2026-09-30: cockpit menu "Map theme" (menu.properties mapTheme=0 Auto / 1 Day / 2 Night, default 2 =
- * UI_THEME, the look so far). UiConfig ui_theme is also in every 0x8009, so a change goes out live
- * (live_relayout_tick re-reads it about once a second). */
-static int ui_theme = UI_THEME;
-static int menu_setting(const char *key, int dflt);
-/* Run 150 (owner): sending ui_theme AUTOMATIC (0) on the cluster display crashed the phone's Android Auto ->
- * never sent. Menu Auto = the car's own day/night (Luka DayNight writes /tmp/sq5_daynight "SQ5D <0|1>",
- * 1 = night): Light by day, Dark at night, Dark when unknown. */
-int live_theme_for(int menu, const char *daynight_rec)
-{
-    int night;
-    if (menu == 1 || menu == 2) return menu;
-    if (menu != 0) return (int)UI_THEME;
-    if (daynight_rec && sscanf(daynight_rec, "SQ5D %d", &night) == 1 && (night == 0 || night == 1)) return night ? 2 : 1;
-    return 2;
-}
-static int theme_now(void)
-{
-    char rec[16] = {0};
-    int menu = menu_setting("mapTheme=", (int)UI_THEME);
-    if (menu == 0) {
-        FILE *f = fopen("/tmp/sq5_daynight", "r");
-        if (f) { if (!fgets(rec, sizeof(rec), f)) rec[0] = 0; fclose(f); }
-    }
-    return live_theme_for(menu, rec);
-}
+/* UiConfig ui_theme: always Dark. Runs 150 and 162 (owner): Automatic (0) and Light (1) on the cluster display
+ * both crashed the phone's Android Auto - after a live switch to Light the phone never acked the 0x8009 and the
+ * whole link restarted 10 s later. The menu Map theme item and the day/night reader were removed; a saved
+ * mapTheme= value is ignored. */
+static const int ui_theme = UI_THEME;
 
 /* UiConfig body: 0x12 len {content insets}, 0x20 theme (theme dropped when it does not fit in max). */
 static unsigned uiconfig_body(unsigned char *ui, unsigned max, uint32_t t, uint32_t b, uint32_t l, uint32_t r)
@@ -194,7 +173,6 @@ static void apply(void *vconf, const char *where)
     {   uint32_t num = rd(vconf, 0x28) == 3u ? 3u : rd(vconf, 0x28) == 1u ? 5u : 1u;
         uint32_t den = rd(vconf, 0x28) == 3u ? 2u : rd(vconf, 0x28) == 1u ? 8u : 1u;
         load_insets();
-        ui_theme = theme_now();              /* menu Map theme at connect */
         ui_num = num; ui_den = den;
         ui_top = ui_top * num / den; ui_bottom = ui_bottom * num / den; ui_left = ui_left * num / den; ui_right = ui_right * num / den;
         vp_mode = rd(vconf, 0x28) == 3u && access("/fs/sda0/sq5_cluster_band", F_OK) != 0;   /* SD flag = old band path */
@@ -407,10 +385,6 @@ void live_relayout_tick(void *sink)
         return;
     }
     if (mz_dirty && stage == 2) { mz_dirty = 0; pending = sent_view; return; }   /* map zoom: resend the current layout */
-    if (stage == 2 && ticks % 30u == 0u) {       /* menu Map theme changed: resend the current layout with it */
-        int th = theme_now();
-        if (th != ui_theme) { probe_log("theme %d -> %d", ui_theme, th); ui_theme = th; pending = sent_view; return; }
-    }
     if (ticks % 15u) return;
     /* 0 L / 1 C / 2 S (Luka view + skin); legacy band path: classic and sport share the one small layout */
     small = live_view_state();

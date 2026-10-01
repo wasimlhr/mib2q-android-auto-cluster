@@ -37,7 +37,7 @@ public final class AaClusterMenu {
     private static final int KEY_ARROW_L = 99, KEY_ARROW_R = 100, ST_LONG_ARROW = 3;
     private static final int ST_RELEASED = 0, ST_PRESSED = 1, ST_LONG = 2;
     private static final long IDLE_CLOSE_MS = 15000L, SELECT_WINDOW_MS = 700L;
-    static final int ITEM_UP = 0, ITEM_ARROW = 1, ITEM_SIZE = 2, ITEM_RES = 3, ITEM_THEME = 4, ITEM_CLOSE = 5, ITEMS = 6;
+    static final int ITEM_UP = 0, ITEM_ARROW = 1, ITEM_SIZE = 2, ITEM_RES = 3, ITEM_CLOSE = 4, ITEMS = 5;   /* run 162: Map theme removed (Light crashed Android Auto) */
     /* Owner 2026-09-29: density and resolution from the menu (the phone reads both when it connects, so they
      * apply from the next connection). size 1..3 = Small/Medium/Large (the hook maps it to a density per resolution);
      * res 3 = 1080p, 2 = 720p. Read by the hook (src/uiconfig.c live_dpi / live_res) from the settings file. */
@@ -62,10 +62,6 @@ public final class AaClusterMenu {
      * The roller always zooms the map (hook resizes Google's layout); kept as a constant for the record. */
     private static final int zoomMode = 1;
     private static int res = 3;            /* 3 = 1080p (owner 2026-09-30: target 1080p), 2 = 720p */
-    /* Owner 2026-09-30: map theme for the cockpit map, sent live by the hook (UiConfig ui_theme):
-     * 0 Auto (Android Auto follows the car's day/night), 1 Day, 2 Night (default = the look so far). */
-    private static int theme = 2;
-    private static final String[] THEME_NAMES = { "Auto", "Day", "Night" };
     private static long lastInputMs;
     private static long selectUntilMs;     /* consume the collapsed DDS_SELECT of a menu roller press */
     /* Run 137 (owner): the menu opens / closes only on a 2 s hold of the right arrow (100) or the button left of
@@ -159,9 +155,6 @@ public final class AaClusterMenu {
         } else if (sel == ITEM_RES) {
             res = res == 3 ? 2 : 3;
             save();
-        } else if (sel == ITEM_THEME) {
-            theme = (theme + 1) % 3;          /* press cycles Auto -> Day -> Night */
-            save();
         } else if (sel == ITEM_ARROW) {
             arrow = !arrow;
             applyArrow();
@@ -220,7 +213,6 @@ public final class AaClusterMenu {
             arrow = intValue(s, "arrowBox=", 1) != 0;   /* run 102: new key, default on (hiding left an empty transparent box) */
             size = clamp(intValue(s, "size=", 3), 1, 5);   /* 2026-09-30: replaces density= (old values ignored) */
             res = intValue(s, "stream=", 3) == 2 ? 2 : 3;   /* run 108: new keys - the old up=-60 / res= are baked into the defaults */
-            theme = clamp(intValue(s, "mapTheme=", 2), 0, 2);
             AaLog.log("menu: settings up=" + up + " upSmall=" + upSmall + " arrow=" + arrow + " size=" + size + " res=" + res);
         } catch (Throwable t) {
             arrow = true;
@@ -247,7 +239,7 @@ public final class AaClusterMenu {
             new File(DIR).mkdirs();
             o = new FileOutputStream(SETTINGS);
             o.write(("upFull=" + up + "\nupSport=" + upSmall + "\narrowBox=" + (arrow ? 1 : 0) + "\nrollerZoom=" + zoomMode + "\nsize=" + size
-                + "\nstream=" + res + "\nmapTheme=" + theme + "\n").getBytes());
+                + "\nstream=" + res + "\n").getBytes());
         } catch (Throwable t) {
             AaLog.log("menu: settings not saved: " + t);
         } finally {
@@ -267,7 +259,6 @@ public final class AaClusterMenu {
         s.append("Arrow tile\t").append(arrow ? "Always" : "Audi").append('\n');   /* Audi = only near turns, like stock */
         s.append("Size (on reconnect)\t").append(SIZE_NAMES[size]).append('\n');
         s.append("Resolution (on reconnect)\t").append(res == 2 ? "720p" : "1080p").append('\n');
-        s.append("Map theme\t").append(THEME_NAMES[theme]).append('\n');
         s.append("Close\t\n");
         s.append("end ").append(seq).append('\n');
         while (s.length() < 511) s.append(' ');
@@ -313,7 +304,7 @@ public final class AaClusterMenu {
     public static synchronized void setTestSmallView(Boolean small) { testSmallView = small; }
 
     public static synchronized void resetForTest() {
-        open = false; edit = false; sel = 0; seq = 0; up = 0; upSmall = 0; arrow = false; size = 3; res = 3; theme = 2; lastInputMs = 0; selectUntilMs = 0;
+        open = false; edit = false; sel = 0; seq = 0; up = 0; upSmall = 0; arrow = false; size = 3; res = 3; lastInputMs = 0; selectUntilMs = 0;
         loaded = true;
     }
 
@@ -324,5 +315,4 @@ public final class AaClusterMenu {
     public static synchronized int size() { return size; }
     public static synchronized int zoomMode() { return zoomMode; }
     public static synchronized int res() { return res; }
-    public static synchronized int theme() { return theme; }
 }

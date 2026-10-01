@@ -52,10 +52,10 @@ public final class AaClusterMenuTest {
         /* roller moves the selection, wraps */
         check(AaClusterMenu.onRoller(-1, t + 10), "roller consumed while open");
         check(AaClusterMenu.selection() == 1, "roller +1 -> item 1");
-        for (int i = 0; i < 5; i++) AaClusterMenu.onRoller(-1, t + 20 + i);
+        for (int i = 0; i < 4; i++) AaClusterMenu.onRoller(-1, t + 20 + i);
         check(AaClusterMenu.selection() == 0, "wraps to item 0");
         AaClusterMenu.onRoller(1, t + 40);
-        check(AaClusterMenu.selection() == 5, "wraps backwards to Close");
+        check(AaClusterMenu.selection() == 4, "wraps backwards to Close");
         AaClusterMenu.onRoller(-1, t + 50);
 
         /* press: edit Map up/down, roller changes the value in steps of 10, clamped */
@@ -101,18 +101,9 @@ public final class AaClusterMenuTest {
         AaClusterMenu.onKey(4, 40, 1, t + 514);
         check(AaClusterMenu.res() == 2 && rec(f).indexOf("Resolution (on reconnect)\t720p") > 0, "toggled to 720p");
         /* Close item closes; its press is still consumed for the centre screen */
-        /* Map theme: Night by default, press cycles Auto -> Day -> Night */
-        AaClusterMenu.onRoller(-1, t + 516);
-        check(AaClusterMenu.selection() == 4 && AaClusterMenu.theme() == 2 && rec(f).indexOf("Map theme\tNight") > 0, "on Map theme, Night by default");
-        AaClusterMenu.onKey(4, 40, 1, t + 516);
-        check(AaClusterMenu.theme() == 0 && rec(f).indexOf("Map theme\tAuto") > 0, "press -> Auto");
-        AaClusterMenu.onKey(4, 40, 1, t + 516);
-        check(AaClusterMenu.theme() == 1 && rec(f).indexOf("Map theme\tDay") > 0, "press -> Day");
-        AaClusterMenu.onKey(4, 40, 1, t + 516);
-        check(AaClusterMenu.theme() == 2, "press -> Night again");
         /* run 137: no Roller zoom item any more (Digital zoom removed; the roller always zooms the map) */
         AaClusterMenu.onRoller(-1, t + 517);
-        check(AaClusterMenu.selection() == 5 && AaClusterMenu.zoomMode() == 1 && rec(f).indexOf("Roller zoom") < 0, "on Close, no Roller zoom item, Map zoom fixed");
+        check(AaClusterMenu.selection() == 4 && AaClusterMenu.zoomMode() == 1 && rec(f).indexOf("Roller zoom") < 0 && rec(f).indexOf("Map theme") < 0, "on Close, no Roller zoom / Map theme item");
         AaClusterMenu.onKey(4, 40, 1, t + 520);
         check(rec(f).length() == 512, "record still 512 bytes with 5 items");
         check(!AaClusterMenu.isOpen(), "Close closes");

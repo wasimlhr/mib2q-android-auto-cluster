@@ -80,14 +80,8 @@ int main(void)
         assert(t == 348 && b == 416 && l > l0 && r > r0);
         assert(((int)l - (int)l0) - ((int)r - (int)r0) <= 1 && ((int)l - (int)l0) - ((int)r - (int)r0) >= -1);
     }
-    /* menu Map theme: the value goes out in the 0x8009 (last field 0x20 <theme>) - Day = 1, Auto = 0 */
-    ui_theme = 1; n = live_relayout_message(p, sizeof(p), 0); assert(p[n - 2] == 0x20 && p[n - 1] == 1);
-    ui_theme = 0; n = live_relayout_message(p, sizeof(p), 0); assert(p[n - 2] == 0x20 && p[n - 1] == 0);
-    ui_theme = UI_THEME;
-    /* run 150: Auto never sends 0 (crashed Android Auto) - it follows the car's day/night: Light / Dark / Dark */
-    assert(live_theme_for(0, "SQ5D 0\n ") == 1 && live_theme_for(0, "SQ5D 1\n ") == 2 && live_theme_for(0, "") == 2);
-    assert(live_theme_for(0, NULL) == 2 && live_theme_for(1, NULL) == 1 && live_theme_for(2, "SQ5D 0\n ") == 2);
-    assert(live_theme_for(7, NULL) == 2 && live_theme_for(-1, NULL) == 2);
+    /* run 162: the theme is always Dark (Light / Automatic crashed Android Auto on the cluster display) */
+    n = live_relayout_message(p, sizeof(p), 0); assert(p[n - 2] == 0x20 && p[n - 1] == 2);
     vp_mode = 0;
     /* too small an output buffer is refused */
     assert(live_relayout_message(p, 10, 1) == 0);
