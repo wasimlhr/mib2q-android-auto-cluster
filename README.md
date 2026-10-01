@@ -51,8 +51,14 @@ tests and installer do not need to be reinvented.
 
 ### Google Maps and Waze in action
 
-Every image below is from Google Maps or Waze running through Android Auto on the tested 2018 SQ5
-with MU0918.
+Every photo and animation below is from Google Maps or Waze running through Android Auto on the
+tested 2018 SQ5 with MU0918.
+
+<p align="center">
+  <img src="assets/gallery/cockpit_layout_switching.gif" alt="Android Auto map continuing while the Virtual Cockpit switches between full-map and Sport layouts" />
+  <br />
+  <sub><b>Live cockpit switching</b> — the independent Android Auto map follows the active Audi layout</sub>
+</p>
 
 <table>
   <tr>
