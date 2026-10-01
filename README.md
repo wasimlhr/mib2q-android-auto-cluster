@@ -110,11 +110,11 @@ presented here as Android Auto evidence.
 
 | | |
 | --- | --- |
-| **1080p independent cockpit stream**<br />A real second Android Auto display, separate from the centre screen. | **30 fps hardware-decoded video**<br />Qualcomm H.264 decoding with automatic FFmpeg fallback. |
-| **Native cockpit sharpness**<br />1440×540 viewport shown 1:1 at the panel's physical 125 DPI. | **HUD guidance**<br />Turn arrows, distance and lane information in Audi's head-up display. |
-| **Android Auto album art**<br />Cover art and metadata appear through Audi's native media screens. | **Hidden steering-wheel menu**<br />Change size, map position, arrow tile, resolution and Day/Night/Auto theme. |
-| **Live Audi layouts**<br />Large, Classic and Sport layouts switch without restarting Android Auto. | **Google Maps and Waze**<br />Both navigation apps are tested with live cockpit guidance. |
-| **Cockpit arrow tile**<br />Street, maneuver and 16-step distance bars with selectable behavior. | **Wired and wireless**<br />Tested over direct USB and through a wireless Android Auto adapter. |
+| 🖥️ **1080p independent cockpit stream**<br />A real second Android Auto display, separate from the centre screen. | ⚡ **30 fps hardware-decoded video**<br />Qualcomm H.264 decoding with automatic FFmpeg fallback. |
+| 🔎 **Native cockpit sharpness**<br />1440×540 viewport shown 1:1 at the panel's physical 125 DPI. | 🧭 **HUD guidance**<br />Turn arrows, distance and lane information in Audi's head-up display. |
+| 🎵 **Android Auto album art**<br />Cover art and metadata appear through Audi's native media screens. | 🎛️ **Hidden steering-wheel menu**<br />Change size, map position, arrow tile, resolution and Day/Night/Auto theme. |
+| 🔄 **Live Audi layouts**<br />Large, Classic and Sport layouts switch without restarting Android Auto. | 🗺️ **Google Maps and Waze**<br />Both navigation apps are tested with live cockpit guidance. |
+| ➡️ **Cockpit arrow tile**<br />Street, maneuver and 16-step distance bars with selectable behavior. | 🔌 **Wired and wireless**<br />Tested over direct USB and through a wireless Android Auto adapter. |
 
 ### Independent Android Auto cockpit display
 
