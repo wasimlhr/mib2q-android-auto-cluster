@@ -1,5 +1,9 @@
 # MIB2Q Android Auto Cluster
 
+<p align="center">
+  <img src="assets/android_auto_port_header.png" alt="W4R's Android Auto port for the Audi SQ5 Virtual Cockpit" />
+</p>
+
 > [!IMPORTANT]
 > This is an **Android Auto** project built from two earlier open-source foundations:
 >
