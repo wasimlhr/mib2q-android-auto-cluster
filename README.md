@@ -36,6 +36,52 @@ guidance list. This is not a copy of the centre-screen framebuffer.
 The most recent on-car validation sustained approximately 29–30 decoded frames per second and
 24–27 displayed frames per second in the normal 1:1 view.
 
+## Gallery: guidance, HUD and Audi integration
+
+**Android Auto's independent map stream on the SQ5**
+
+<p align="center">
+  <img src="assets/gallery/android_auto_large.png" height="300" alt="Android Auto Google Maps cluster stream in the Large cockpit view" />
+  <img src="assets/gallery/android_auto_sport.png" height="300" alt="Android Auto Google Maps cluster stream in the Sport cockpit view" />
+</p>
+
+The remaining guidance pictures come from LuKa's upstream gallery and show the output stack that this
+Android Auto fork uses directly: the maneuver renderer, BAP route data, lane guidance, cockpit window
+handling and HUD publication. Android Auto events are translated into that same stack here. They
+therefore represent the HUD and guidance behavior available in this project, although the original
+source session for some photographs was CarPlay.
+
+<p align="center">
+  <img src="assets/gallery/maneuver_demo.gif" width="90%" alt="Animated Virtual Cockpit maneuver renderer" /><br />
+  <sub>Shared maneuver renderer, including distance fill and destination guidance</sub>
+</p>
+
+**Virtual Cockpit route guidance and lanes**
+
+<p align="center">
+  <img src="assets/gallery/vc_day_nav.jpeg" height="200" alt="Day route guidance in the Virtual Cockpit" />
+  <img src="assets/gallery/vc_night_nav.jpeg" height="200" alt="Night route guidance in the Virtual Cockpit" />
+  <img src="assets/gallery/vc_lane_guidance.jpeg" height="200" alt="Lane guidance in the Virtual Cockpit" />
+</p>
+
+**Head-up display: maneuver, distance, approach bars and lanes**
+
+<p align="center">
+  <img src="assets/gallery/IMG_0623.jpeg" width="30%" alt="HUD maneuver and approach distance" />
+  <img src="assets/gallery/IMG_6302.jpeg" width="30%" alt="HUD roundabout maneuver and approach bars" />
+  <img src="assets/gallery/IMG_0599.jpeg" width="30%" alt="HUD lane guidance and maneuver" />
+</p>
+
+**Shared Audi media and parking integration**
+
+<p align="center">
+  <img src="assets/gallery/cover_art.jpeg" width="45%" alt="Album art in the Audi Virtual Cockpit" />
+  <img src="assets/gallery/pdc_over_carplay.jpeg" width="45%" alt="Audi parking panel beside projected-phone UI" />
+</p>
+
+The media photograph retains its original CarPlay label. The Android Auto port feeds its cover art
+through the same Audi picture-manager path; the PDC policy was likewise ported to Android Auto.
+
 ## Comparison
 
 The figures for this project are measured on the SQ5 or verified in its source and logs. RoadKernel
