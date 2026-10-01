@@ -49,7 +49,10 @@ tests and installer do not need to be reinvented.
 
 ## Gallery
 
-Every image below is from the tested 2018 SQ5 running Android Auto on MU0918.
+### Google Maps and Waze in action
+
+Every image below is from Google Maps or Waze running through Android Auto on the tested 2018 SQ5
+with MU0918.
 
 <table>
   <tr>
