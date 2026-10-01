@@ -49,16 +49,47 @@ tests and installer do not need to be reinvented.
 
 ## Gallery
 
-**Android Auto's independent map stream on the SQ5**
+Every image below is from the tested 2018 SQ5 running Android Auto on MU0918.
 
-<p align="center">
-  <img src="assets/gallery/android_auto_large.png" height="300" alt="Android Auto Google Maps cluster stream in the Large cockpit view" />
-  <img src="assets/gallery/android_auto_sport.png" height="300" alt="Android Auto Google Maps cluster stream in the Sport cockpit view" />
-</p>
+<table>
+  <tr>
+    <td width="33%" align="center">
+      <img src="assets/gallery/android_auto_sport_guidance.jpeg" alt="Android Auto guidance in the Sport cockpit view" /><br />
+      <sub><b>Sport view</b> — independent map and compact guidance card</sub>
+    </td>
+    <td width="33%" align="center">
+      <img src="assets/gallery/android_auto_large_guidance.jpeg" alt="Android Auto guidance in the Large cockpit view with Audi arrow tile" /><br />
+      <sub><b>Large view</b> — Google card beside Audi's arrow tile</sub>
+    </td>
+    <td width="33%" align="center">
+      <img src="assets/gallery/android_auto_full_map.jpeg" alt="Android Auto full map layout in the Virtual Cockpit" /><br />
+      <sub><b>Full map</b> — native 1:1 cockpit viewport</sub>
+    </td>
+  </tr>
+</table>
 
-More verified Android Auto screenshots and GIFs—including HUD, lane guidance, album art, cockpit
-layouts and parking behavior—will be added from this car. The inherited CarPlay gallery remains in
-the repository as upstream history but is intentionally not presented here as Android Auto evidence.
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="assets/gallery/cockpit_options_menu.jpeg" alt="Steering-wheel Android Auto cockpit options menu" /><br />
+      <sub><b>Cockpit options</b> — size, position, arrow tile, resolution and theme</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="assets/gallery/android_auto_album_art.jpeg" alt="Android Auto album art in Audi's media display" /><br />
+      <sub><b>Audi media integration</b> — Android Auto metadata and album art</sub>
+    </td>
+  </tr>
+</table>
+
+<details>
+  <summary><b>M.I.B. logging and SD-card workflow</b></summary>
+  <p align="center">
+    <img src="assets/gallery/mib_log_collection.jpeg" height="500" alt="M.I.B. custom script saving Android Auto logs to the SD card" />
+  </p>
+</details>
+
+The inherited CarPlay gallery remains in the repository as upstream history but is intentionally not
+presented here as Android Auto evidence.
 
 ## Features
 
