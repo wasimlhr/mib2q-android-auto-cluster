@@ -1,8 +1,21 @@
 # MIB2Q Android Auto Cluster
 
-Native Android Auto map video, route guidance and HUD integration for Audi MHI2Q. This project was
-developed and validated on a 2018 B9 SQ5 with `MHI2Q_US_AUG22_P3639`, MU0918 and the first-generation
-Virtual Cockpit.
+> [!IMPORTANT]
+> This is an **Android Auto** project built from two earlier open-source foundations:
+>
+> - **[LuKa's stack](https://github.com/luka-dev/mib2q-carplay-rgi)** is the foundation for the HUD,
+>   turn arrows, lane guidance, maneuver renderer and Virtual Cockpit window/context handling.
+> - **[OneB1t/chopinwong01's approach](https://github.com/chopinwong01/mhi2-android-auto-video-vc)**
+>   came first for Android Auto cluster video: hook the stock receiver, advertise a second cockpit
+>   display and accept the phone's independent H.264 stream.
+>
+> This fork combines and ports those foundations to Audi MHI2Q MU0918, then adds the Qualcomm decoder,
+> 1080p 1:1 viewport, live cockpit layouts, Android Auto event bridge, steering-wheel controls and a
+> firmware-gated M.I.B. installer. Both upstream projects retain full credit and history.
+
+This project provides native Android Auto map video, route guidance and HUD integration for Audi
+MHI2Q. It was developed and validated on a 2018 B9 SQ5 with `MHI2Q_US_AUG22_P3639`, MU0918 and the
+first-generation Virtual Cockpit.
 
 The phone creates a real second Android Auto display. It sends an independent H.264 cluster stream on
 channel 64 while the centre display remains available for music, calls, messages or Android Auto's
@@ -22,6 +35,36 @@ guidance list. This is not a copy of the centre-screen framebuffer.
 
 The most recent on-car validation sustained approximately 29–30 decoded frames per second and
 24–27 displayed frames per second in the normal 1:1 view.
+
+## Comparison
+
+The figures for this project are measured on the SQ5 or verified in its source and logs. RoadKernel
+details are limited to the package and demonstrations available during this research; values that were
+not published are identified as such. LuKa's column describes the upstream CarPlay project rather than
+the Android Auto additions in this fork.
+
+| Capability | This project | RoadKernel | [LuKa (CarPlay)](https://github.com/luka-dev/mib2q-carplay-rgi) |
+| --- | --- | --- | --- |
+| **Phone system** | Android Auto | Android Auto | CarPlay |
+| **Live map in the cockpit** | Yes. Android Auto's own cockpit stream, independent of the centre screen | Yes, independent of the centre screen | No projected map; turn guidance is drawn over Audi's native map |
+| **Stream** | 1080p at 30 fps, with a 1440×540 viewport shown 1:1 | 720p at 30 fps, scaled | n/a |
+| **Video decoding** | Qualcomm hardware decoder with automatic FFmpeg fallback | Hardware decoder | n/a |
+| **Frames shown** | Approximately 24–27 of the 30 frames sent each second | Not published | n/a |
+| **Sharpness and UI size** | 95/110/125 DPI at 1080p for Small/Medium/Large; 125 DPI matches the cockpit's physical ~125 PPI | Not published | n/a |
+| **Cockpit views** | Large, Classic and Sport, each with its own layout and live switching | Large, Classic and Sport | Guidance overlay follows the supported Audi layouts |
+| **Google card beside Audi's arrow tile** | Yes | Yes | n/a |
+| **HUD** | Turn arrows, distance and lanes | No | Turn arrows and distance from CarPlay |
+| **Cockpit arrow tile** | Turn arrow, street and 16-step distance bars; selectable always-on or Audi-style behavior | Stock Audi tile | Stock Audi tile |
+| **Lane guidance** | Cockpit and HUD | Not published | Yes, from CarPlay |
+| **Steering-wheel menu** | Size, map position, arrow tile, resolution and Day/Night/Auto theme; opens with a two-second hold | No | No |
+| **Day/night map** | Follows the headlights or can be fixed to Day or Night | Not published | n/a |
+| **Map roller** | Adjusts car position in Large and card layout in Sport | No zoom | n/a |
+| **MMI touchpad** | Swipes navigate Android Auto menus while handwriting remains available | Not published | Not published |
+| **Album art** | Yes. Android Auto cover art appears in Audi's media screens | Not available | Yes for CarPlay; this implementation builds on LuKa's work |
+| **Navigation apps tested** | Google Maps and Waze | Google Maps | Apple Maps |
+| **Firmware represented here** | MU0918, tested on the car | MU1316 package examined | MU1316 releases; firmware-specific rebuilds may be required |
+| **Installation** | SD card through M.I.B.; automatic logs, audit, off switch and exact uninstall rollback | SD card and rollback package; package observed tied to the vehicle VIN | SD card through M.I.B. |
+| **Price and licence** | Free, GPL-3.0-or-later | Commercial, €100 at the time examined | Free; GPL-3.0 announced upstream and publication permission granted |
 
 ## Supported firmware
 
