@@ -1,279 +1,117 @@
-# MHI2Q CarPlay cluster integration
+# MIB2Q Android Auto Cluster
 
-CarPlay patch set for Audi MHI2Q infotainment.
-(Based on MHI2Q firmware, but may need rebuild for different versions.)
+Native Android Auto map video, route guidance and HUD integration for Audi MHI2Q. This project was
+developed and validated on a 2018 B9 SQ5 with `MHI2Q_US_AUG22_P3639`, MU0918 and the first-generation
+Virtual Cockpit.
 
-**Disclaimer:** Use at your own risk. These patches modify firmware binaries and system configurations on your infotainment unit. Always back up all original files before making any changes. The authors are not responsible for any damage, bricked devices, or warranty issues resulting from use of these patches.
+The phone creates a real second Android Auto display. It sends an independent H.264 cluster stream on
+channel 64 while the centre display remains available for music, calls, messages or Android Auto's
+guidance list. This is not a copy of the centre-screen framebuffer.
 
-## 🖼️ Gallery
+## Current result
 
-<p align="center">
-  <img src="assets/gallery/maneuver_demo.gif" width="90%" /><br />
-  <sub>Cluster maneuver renderer driven through a demo route</sub>
-</p>
+- Separate 1920x1080 Android Auto cluster stream, negotiated with GAL protocol 4.3.
+- Google Maps and Waze rendered natively for the cockpit.
+- Qualcomm `OMX.qcom.video.decoder.avc` hardware decoding with automatic FFmpeg fallback.
+- 1440x540 phone viewport presented 1:1 in the Virtual Cockpit.
+- Live Large, Classic and Sport layouts through Android Auto message `0x8009`.
+- Steering-wheel map zoom, cockpit options menu, map theme and UI-size controls.
+- Turn arrows, distance and lane information in the Virtual Cockpit and HUD.
+- Android Auto cover art, touchpad navigation and parking-popup integration.
+- Feature off switches, conservative installation, log collection and exact uninstall rollback.
 
-**Virtual Cockpit: route guidance from the maneuver renderer**
+The most recent on-car validation sustained approximately 29–30 decoded frames per second and
+24–27 displayed frames per second in the normal 1:1 view.
 
-<p align="center">
-  <img src="assets/gallery/vc_day_nav.jpeg" height="200" />
-  <img src="assets/gallery/vc_night_nav.jpeg" height="200" />
-</p>
-<p align="center">
-  <img src="assets/gallery/vc_full_map.jpeg" height="200" />
-  <img src="assets/gallery/vc_lane_guidance.jpeg" height="200" />
-</p>
+## Supported firmware
 
-**Audi front PDC no longer hides CarPlay** · **Cover art on the cluster**
+| Firmware | Status |
+| --- | --- |
+| `MHI2Q_US_AUG22_P3639` MU0918 | Validated on the car |
+| Other MHI2Q versions | Port required until their GAL ABI and HMI classes are verified |
 
-<p align="center">
-  <img src="assets/gallery/pdc_over_carplay.jpeg" width="45%" />
-  <img src="assets/gallery/cover_art.jpeg" width="45%" />
-</p>
+The native hook contains firmware-specific C++ ABI seams. Similar hardware is not enough to make an
+unknown binary safe. Run the checker against files obtained from your own unit:
 
-**Head-up display**
+```bash
+python scripts/check_firmware.py \
+  --gal /path/to/gal \
+  --receiver /path/to/libautoreceiver.so \
+  --lsd-jxe /path/to/lsd.jxe \
+  --stock-jar /path/to/lsd.jar \
+  --compile-jar /path/to/lsd_ic.jar
+```
 
-<p align="center">
-  <img src="assets/gallery/IMG_0623.jpeg" width="30%" />
-  <img src="assets/gallery/IMG_6302.jpeg" width="30%" />
-  <img src="assets/gallery/IMG_0599.jpeg" width="30%" />
-</p>
+The checker is read-only. It reports `validated-profile`, `port-required`, `unsupported` or
+`incomplete`, and lists every change the installer would make. Firmware binaries and converted stock
+JARs are never stored in this repository.
 
-## 📍 Contents
-
-- [Gallery](#-gallery)
-- [Features](#-features)
-- [Repository layout](#-repository-layout)
-- [Build](#-build)
-- [Deployment](#-deployment)
-- [Logging](#-logging)
-- [Documentation](#-documentation)
-- [Help wanted](#-help-wanted)
-- [References](#-references)
-
-## ✨ Features
-
-There is nothing to switch on: plug in the iPhone and CarPlay starts as usual; the cluster
-features below follow it automatically.
-
-- **Turn-by-turn on the cluster.** During CarPlay navigation the Virtual Cockpit shows a 3D maneuver
-  arrow drawn over the cluster's own native map (the stock map stays; there is no CarPlay map on the
-  cluster). The arrow fills as the turn approaches and blinks just before it, lane arrows appear under
-  it, and the cluster also shows distance to the turn, arrival time and remaining distance. Needs an
-  app that sends CarPlay route guidance: Apple Maps and Google Maps do, AMap does with its CarPlay
-  guidance setting on, Waze does not
-  ([details](docs/rgd/rgd-activation.md#-which-navigation-apps-send-route-guidance)).
-- **Route text in the Virtual Cockpit.** A text line names the exit sign or the next road (the
-  current road when there is nothing else); long names scroll. Press **OK** (the left steering-wheel
-  roller) to switch it to arrival time and time left, and press again to go back; it returns by itself
-  after 20 s ([details](docs/rgd/vc-route-text.md)).
-- **Head-up display.** The same maneuver icons, lane arrows and distance appear on the HUD.
-- **Steering-wheel roller** keeps zooming the stock cluster map, as without CarPlay.
-- **Cover art on the cluster.** The now-playing album art shows on the cluster media screen.
-- **Parking popups no longer hide CarPlay.** When the Audi front PDC / parking view pops up beside it,
-  CarPlay stays on screen instead of being replaced ([details](docs/hmi/pdc-small-stage.md)).
-- **MMI touchpad → DPAD bridging** so finger drags navigate CarPlay menus.
-
-## 🗂️ Repository layout
+## Repository layout
 
 | Path | Purpose |
 | --- | --- |
-| `hook/` | Shipping native `libcarplay_hook.so` source |
-| `java_patch/` | The only supported Java patch source |
-| `java_resources/` | Resources packed into the jar (VC glyph-width / Unicode table `vc-text.bin`) |
-| `maneuver_render/` | GLES maneuver overlay renderer (C, plus the C++11 `scene/` engine) |
-| `common/` | Shared renderer code: QNX Screen surface, GL program-binary cache, log timestamps |
-| `deploy/smartphone_integrator/` | Runtime scripts and child-process configuration for the HU |
-| `install_MoreIncredibleBash/`, `uninstall_MoreIncredibleBash/`, `logging_MoreIncredibleBash/` | M.I.B. custom scripts that install / remove a staged release / collect logs |
-| `scripts/` | Docker build entry points (Java / hook / renderer) and host test runners |
-| `tests/` | Host tests (C, Java, Python) for the hook, Java bridge and renderer |
-| `toolchain/qnx65-abi/` | QNX Screen ABI headers used only for cross-compilation |
-| `docs/` | Markdown knowledge base (also opens in Obsidian) - validated RE + implementation notes (open [`docs/INDEX.md`](docs/INDEX.md)) |
-| `assets/` | Screenshots and visual reference material |
-| `build/` | Canonical deployable artifacts |
+| `android_auto/hook/` | GAL/libautoreceiver hook, channel transport, OMX/FFmpeg player and host tests |
+| `android_auto/java/` | Android Auto event bridge, cockpit/HUD integration, menu and firmware Java seams |
+| `android_auto/deploy/` | Standalone GAL launcher and renderer supervision |
+| `firmware/profiles/` | Public hashes and sizes for validated firmware; no firmware content |
+| `install_AndroidAuto_MoreIncredibleBash/` | M.I.B. audit/install/uninstall entrypoint |
+| `scripts/` | Compatibility checker, reproducible builds and SD-card staging |
+| `common/`, `maneuver_render/`, `toolchain/` | Shared LuKa renderer foundation retained from upstream |
+| `docs/android-auto/` | Architecture, installation, porting and validation notes |
 
-Raw unit logs and generated class trees are intentionally kept outside Git.
+The inherited CarPlay implementation remains in the working tree as upstream reference so fixes can
+still be contributed cleanly to LuKa. Android Auto development and packaging are isolated under the
+paths above on `android-auto-mu0918`; the Android Auto installer never deploys the CarPlay hook.
 
-## 🔧 Build
+## Build
 
-Native code needs the QNX 6.5 ARMv7 cross-toolchain image from
-[luka-dev/qnx65-armv7-toolchain](https://github.com/luka-dev/qnx65-armv7-toolchain). Build it once:
+The build uses the QNX 6.5 ARMv7 Docker toolchain from
+[`luka-dev/qnx65-armv7-toolchain`](https://github.com/luka-dev/qnx65-armv7-toolchain). Build that image
+once, then run:
 
-```sh
-git clone https://github.com/luka-dev/qnx65-armv7-toolchain
-cd qnx65-armv7-toolchain
-./host-scripts/qnx-run.sh build        # qnx65-armv7-toolchain:latest (GCC 8.5)
+```bash
+./scripts/build_android_auto_native.sh
+./scripts/build_renderers.sh
+./scripts/build_android_auto_java.sh \
+  --stock-jar /private/path/lsd.jar \
+  --compile-jar /private/path/lsd_ic.jar
+python scripts/stage_android_auto.py
 ```
 
-Then run from this repository's root:
+`lsd.jar` and `lsd_ic.jar` must be created from firmware owned by the builder. The Java build checks
+every replaced class against that input and fails if a public/protected member or class header differs.
+Compile-only stubs are checked so they cannot leak into the shipped overlay.
 
-```sh
-./scripts/build_java.sh        # → build/carplay_hook.jar
-./scripts/build_hook.sh        # → build/libcarplay_hook.so
-./scripts/build_renderers.sh   # → build/maneuver_render
-```
+The generated SD folder is `dist/android-auto-card`. Build outputs and private firmware inputs are
+ignored by Git.
 
-All three build in Docker - no host toolchain required. The Java patch compiles in a pinned
-`eclipse-temurin:8` container (against the stock jar + OSGi libs under `../../Tools/jxe2jar`; the
-scripts expect the author's `out/MU1316-final.jar`, so if your own stock jar is named or located
-differently, adjust the path in `scripts/build_java.sh` and the test scripts); the two
-native builds use the `qnx65-armv7-toolchain` image and synthesize their import stubs, so the resulting
-ELF binds the unit's real Screen/EGL/GLES libraries at runtime. The renderer's C++ scene engine is
-built with that image's `g++` and must not pull in the C++ runtime; the hook build rejects any dynamic
-export beyond its five interposers. There are no Java variants.
+## Installation
 
-There is one hook image: logging is always compiled in, WARN/ERROR by default, INFO with the
-`carplay_verbose` marker (see [Logging](#-logging)). The only build-time switch is for debugging:
+1. Make a complete M.I.B. backup of the unit.
+2. Copy `install_AndroidAuto_MoreIncredibleBash` from the staged output to the M.I.B. SD card.
+3. Run the custom script with no marker. It performs a **read-only audit** and prints the exact plan.
+4. If the result says `VALIDATED MU0918 PROFILE`, create an empty `mib2q_aa_install` file in the SD root
+   and run the script again.
+5. Remove the marker, disconnect the phone and reboot the MMI.
 
-```sh
-./scripts/build_hook.sh                        # production image
-LOG_RGD_PACKET_RAW=1 ./scripts/build_hook.sh   # + raw RGD packet hex dumps
-```
+To uninstall, use `mib2q_aa_uninstall` instead. The installer restores the configuration it backed up
+and removes only files it added. See [installation details](docs/android-auto/installation.md) and
+[on-unit changes](docs/android-auto/on-unit-changes.md).
 
-### Tests
+## Upstream and attribution
 
-Host-only, no unit needed:
+This repository is a fork of [`luka-dev/mib2q-carplay-rgi`](https://github.com/luka-dev/mib2q-carplay-rgi).
+LuKa's project supplied the MHI2Q cockpit integration, renderer, build foundation and selected assets.
+The Android Auto cluster protocol work, GAL integration, channel 64 video pipeline, Qualcomm decoder,
+MU0918 port, dynamic layouts and Android Auto controls were developed for this project.
 
-```sh
-./scripts/run_tests.sh            # C + shell: RGD parser, bus, cover art, shader cache, installer, supervisor
-./scripts/test_route_info.sh      # Java route-guidance / BAP bridge against the stock interfaces
-./scripts/test_java_transports.sh # Java bus + renderer sockets, touchpad
-./scripts/test_maneuver_native.sh # renderer engine + lanes (macOS, ASan/UBSan)
-```
+The Android Auto hook also adapts GPL-3.0 work from OneB1t/chopinwong01's
+`mhi2-android-auto-video-vc`. FFmpeg is used under LGPL-2.1-or-later. See
+[`android_auto/THIRD_PARTY.md`](android_auto/THIRD_PARTY.md) and [`LICENSES/README.md`](LICENSES/README.md).
 
-The Java suites need the stock MU1316 jar and JDK under `../../Tools/jxe2jar`. Full toolchain,
-threading, boot and the complete test list live in the knowledge base - see
-[`docs/architecture.md`](docs/architecture.md).
+## Safety boundary
 
-## 🚀 Deployment
-
-**Compatibility.** The patch is not limited to US, EU or CN units, nor to one MU train: it is
-meant for any MHI2Q MU firmware (developed on MU1316). What matters is:
-
-- a fully digital instrument cluster (Audi virtual cockpit); cars with an analog cluster are not
-  supported;
-- preferably, the latest firmware available for the unit, flashed before installing the patch.
-
-With both in place it should almost certainly work, as long as nothing went wrong during the
-install itself.
-
-A release is eight files plus two config edits; nothing stock is replaced and no firewall profile is
-touched:
-
-| On-unit path | Files |
-| --- | --- |
-| `/mnt/app/root/hooks/` | `libcarplay_hook.so`, `maneuver_render` (from `build/`), `flag_atlas.rgba` (from `maneuver_render/resources/`), `carplay_startup.sh`, `carplay_monitor.sh`, `carplay_processes.sh`, `carplay_cleanup.sh` (from `deploy/smartphone_integrator/`) |
-| `/mnt/app/eso/hmi/lsd/jars/` | `carplay_hook.jar` (from `build/`) |
-| `/mnt/system/etc/eso/production/smartphone_integrator.json` | `children.carplay` replaced by [`carplay_child.json`](deploy/smartphone_integrator/carplay_child.json) |
-| `/mnt/system/etc/eso/production/dio_manager.json` | `MessagesSentByAccessory` += `0x5200`, `0x5203`; `MessagesReceivedFromDevice` += `0x5201`, `0x5202`, `0x5204` |
-
-Both the `dio_manager.json` IDs and the hook's runtime Identify patch are required: without the IDs
-iOS sends route guidance and the SDK silently drops it.
-
-**With M.I.B. (recommended).** Copy `install_MoreIncredibleBash/` to the M.I.B. SD card and drop
-**all assets of a release** straight into `mod/carplay/` (the eight files above plus
-`carplay_child.json`; no folders needed), then run **GEM -> M.I.B. -> Advanced Settings -> Run Custom Script** (**Run individual script** on
-M.I.B. release zips up to V3.7.1) with CarPlay disconnected. `custom.sh` checks that the whole
-release is on the card (a partial copy stops before anything is written), copies it with atomic
-renames, patches both configs in place and keeps a `.carplay-stock` backup of each; it never stops
-processes or reboots. It also deletes M.I.B.'s NavActiveIgnore jar, which breaks CarPlay's app
-state. To remove everything, run `uninstall_MoreIncredibleBash/` the same way.
-
-**Manually** (no M.I.B.; needs a root shell on the unit over SSH or Telnet). `mount -uw /mnt/app` and `/mnt/system`, copy the files, back up and
-edit the two configs as text (`dio_manager.json` has `##` comment lines - no JSON tools).
-
-The step-by-step guide for both - the SD layout, installer output and warnings, the exact SI child and
-`dio_manager.json` lines, verification greps, uninstall and the SSH traps - is
-[`docs/deploy/install.md`](docs/deploy/install.md).
-
-**Reboot.** Disconnect CarPlay, run `sync` and wait a few seconds, then reboot normally: a forced
-reboot (the MMI button combo) right after copying can leave the files truncated or missing. The jar is
-on j9's boot classpath, so it only loads after a full restart. On boot `smartphone_integrator` launches
-everything; check `/tmp/carplay_hook.log` and `/tmp/carplay_java.log` (see [Logging](#-logging)).
-
-Exact ownership rules, the `LD_PRELOAD`/env constraints and the MU1316 QNX-compat audit are in
-[`deploy/smartphone_integrator/README.md`](deploy/smartphone_integrator/README.md).
-
-## 📝 Logging
-
-Everything logs to `/tmp` on the unit:
-
-| File | Source |
-| --- | --- |
-| `/tmp/carplay_hook.log` | native hook (inside `dio_manager`) |
-| `/tmp/carplay_java.log` | Java patch (bounded + rotated, `.1` = previous) |
-| `/tmp/maneuver_render.log` | cluster maneuver renderer |
-| `/tmp/carplay_wrapper.log` | startup wrapper and renderer monitor |
-
-By default only warnings and errors are recorded. To capture **everything** (lift hook and Java to
-`INFO`), drop a marker file on the unit - no rebuild needed:
-
-```sh
-touch /mnt/app/carplay_verbose        # survives reboot; /tmp/carplay_verbose does not
-```
-
-Hook and Java read the marker at every CarPlay session start, so it takes effect on the next phone
-connect - no reboot. Remove the marker to return to the quiet default. Logs reset on reboot, so pull
-them before restarting.
-
-For raw route-guidance packet dumps, rebuild the hook with `LOG_RGD_PACKET_RAW=1` (see [Build](#-build)).
-
-**No shell? Use M.I.B.** Copy `logging_MoreIncredibleBash/` to the card and run it like the installer.
-Each run saves everything to `<card>/carplay_logs/NNN/` and then creates `/tmp/carplay_verbose`: run it
-once, reconnect the phone and drive with CarPlay, run it again - the second folder holds the verbose
-session. Attach that folder to a bug report.
-
-## 📚 Documentation
-
-`docs/` is a Markdown knowledge base (also opens in Obsidian) - one note per topic, each fact validated against code /
-firmware / iOS binary. Start at [`docs/INDEX.md`](docs/INDEX.md): architecture & threading, the hook
-and bus, route guidance (TLV → BAP → cluster, lanes, route text), cluster compositing and the maneuver
-renderer, input, deploy/connect, build & host tests, the reverse-engineering references, and a
-per-note verification status.
-
-## 🤝 Help wanted
-
-PRs are welcome - bug fixes, new maneuver cases, docs, on-car test reports.
-
-**Reporting a bad maneuver icon.** The iAP2→BAP mapping covers all 54 CarPlay maneuver types but has
-only been exercised on a limited set of real routes. A snippet of `/tmp/carplay_hook.log` from the
-moment plus a note on what was expected helps a lot. The hook logs unrecognised route-guidance messages
-as `[HOOK] Unknown 0x52xx msgid=0xNNNN dir=IN len=N` followed by a hex dump - that line is the best
-starting point when iOS sends a maneuver type we don't handle yet.
-
-## 🔗 References
-
-Thanks for the prior work and knowledge that helped figure this out.
-
-- https://github.com/ludwig-v/wireless-carplay-dongle-reverse-engineering
-- https://github.com/EthanArbuckle/iPhone18-3_26.1_23B85_Restore
-- https://github.com/adi961/mib2-android-auto-vc
-- [@fifthBro](https://t.me/fifthBro)
-
----
-
-<sub>What are you doing all the way down here? There's nothing to see…</sub>
-
-<details>
-<summary>…or is there?</summary>
-
-<br>
-
-### Coming soon. Maybe. Someday. No promises.
-
-It was just the warm-up, next:
-
-<p align="center">
-  <img src="assets/coming-soon.jpg" width="70%" />
-</p>
-
-- **AltScreen** - full CarPlay map, right in cluster
-- **Multichannel audio support** - from stereo up to 6- or even 8-channel
-- **Apple Spatial Audio**
-- **Dolby Atmos** - High Quality 5.1.2 masters
-- **Video playback** - an Apple TV on wheels
-
-Stay tuned. 👀
-
-</details>
-
----
+The installer does not replace `gal`, `libautoreceiver.so`, `lsd.jxe` or `gal.json`. It adds an overlay
+JAR and runtime files, then changes only `children.gal.exec` and `children.gal.path` in
+`smartphone_integrator.json`. Unknown firmware, an existing third-party GAL launcher, a damaged
+payload or an externally edited installed configuration causes a refusal before activation.
