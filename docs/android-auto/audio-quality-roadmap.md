@@ -43,6 +43,20 @@ This improves spatial presentation and uses the B&O system's discrete channels, 
 
 ## Track B: genuine 24-bit source path
 
+### Projection negotiation gate
+
+Before building the companion transport, the repository carries a separate, reversible
+`probe_AndroidAutoAudio_MoreIncredibleBash` experiment. It changes only the Android Auto media sink
+advertisement from 48 kHz/16-bit/stereo to 48 kHz/24-bit/stereo, captures the resulting GAL/QSA/CSD
+evidence on the next M.I.B. rerun, and restores the exact pre-probe `gal.json`. The probe is not part
+of the cockpit installer and cannot by itself prove end-to-end 24-bit playback.
+
+This is the only useful higher-fidelity stock-projection candidate on the audited hardware. A 96 kHz
+request would still be converted at the MHI2Q 48 kHz transport boundary, and six phone channels test
+surround negotiation rather than source precision. Generic Android `AudioFormat` support for packed
+24-bit PCM proves the phone platform can represent the samples; it does not prove that Android Auto's
+projection endpoint accepts them.
+
 For local high-resolution files, add an optional companion player and receiver side-channel beside the
 Android Auto session:
 
