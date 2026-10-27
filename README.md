@@ -123,6 +123,14 @@ presented here as Android Auto evidence.
 | 🔄 **Live Audi layouts**<br />Large, Classic and Sport layouts switch without restarting Android Auto. | 🗺️ **Google Maps and Waze**<br />Both navigation apps are tested with live cockpit guidance. |
 | ➡️ **Cockpit arrow tile**<br />Street, maneuver and 16-step distance bars with selectable behavior. | 🔌 **Wired and wireless**<br />Tested over direct USB and through a wireless Android Auto adapter. |
 
+### Experimental Android Auto surround
+
+The hook includes an off-by-default, fail-closed stereo-to-5.1 experiment for Android Auto media. A
+probe marker records the stock QSA capabilities without changing audio; active mode reuses the audited
+SCENE renderer only when the receiver reads back an exact 48 kHz/S16/six-channel configuration.
+Stock MU0918 does not expose that geometry yet, so the exact firmware driver gate and on-car speaker
+validation remain mandatory. See [Android Auto surround validation](docs/android-auto/audio-upmix-validation.md).
+
 ### Independent Android Auto cockpit display
 
 - Separate 1920×1080 Android Auto cluster stream negotiated through GAL protocol 4.3.
@@ -352,8 +360,10 @@ passes all 13 stock-class API gates and 162 cockpit/HUD host assertions. See the
   or Automatic theme (on-car test: the phone stopped answering and the whole link restarted), so the
   cockpit map always uses the Dark theme and the theme option was removed.
 - **Android Auto audio fidelity.** The stock receiver negotiates 48 kHz/16-bit/stereo PCM. A compatible
-  six-channel upmix and an optional 24-bit companion-player path are separate planned features; changing
-  `gal.json` to advertise unsupported high-resolution formats is not safe. See the
+  six-channel upmix experiment is now present but is off by default and still awaits the exact MPL6
+  driver port plus on-car validation. It cannot restore discarded source resolution; genuine 24-bit
+  playback requires a separate source-owned transport. Changing `gal.json` to advertise unsupported
+  high-resolution formats is not safe. See the
   [audio-quality roadmap](docs/android-auto/audio-quality-roadmap.md).
 
 ## FAQ

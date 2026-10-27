@@ -15,7 +15,7 @@ from scripts.stage_android_auto import cksum
 
 INSTALLER = REPO / "install_AndroidAuto_MoreIncredibleBash" / "mod" / "custom.sh"
 COMMON_PAYLOADS = (
-    "libsq5_cluster_live.so", "cluster-player", "maneuver_render", "flag_atlas.rgba",
+    "libsq5_cluster_live.so", "cluster-player", "maneuver_render", "flag_atlas.rgba", "scene_masknet_c.bin",
     "gal_startup.sh", "sq5_luka_monitor.sh", "sq5_luka_processes.sh", "sq5_luka_cleanup.sh",
     "config_tool", "profiles.list",
 )
@@ -69,7 +69,8 @@ def main():
         receiver = root / "mnt/app/eso/lib/libautoreceiver.so"
         lsd = root / "ifs/lsd.jxe"
         jar_dir = root / "mnt/app/eso/hmi/lsd/jars"
-        for directory in (payload, sd, cfg.parent, gal.parent, receiver.parent, lsd.parent, jar_dir):
+        tmp_dir = root / "tmp"
+        for directory in (payload, sd, cfg.parent, gal.parent, receiver.parent, lsd.parent, jar_dir, tmp_dir):
             directory.mkdir(parents=True, exist_ok=True)
         shutil.copy2(INSTALLER, mod / "custom.sh")
 
@@ -138,6 +139,7 @@ def main():
         env = os.environ.copy()
         env.update(MIB2Q_AA_TEST_ROOT=shell_path(root))
         script = mod / "custom.sh"
+        (tmp_dir / "sq5_cluster_live-hook-123.log").write_text("aa_upmix.caps test\n", encoding="ascii")
 
         def set_unit(profile_id):
             files = variants[profile_id]
@@ -151,6 +153,9 @@ def main():
             out = run(script, env)
             assert "EXACT INSTALLABLE PROFILE" in out and profile_id[-1].upper() in out, out
             assert cfg.read_bytes() == stock_cfg
+            if profile_id == "profile_a":
+                saved = list((sd / "mib2q-aa-logs").glob("run-*/sq5_cluster_live-hook-123.log"))
+                assert saved and saved[0].read_text(encoding="ascii") == "aa_upmix.caps test\n"
 
             if profile_id == "profile_a":
                 (sd / "mib2q_aa_install").touch()

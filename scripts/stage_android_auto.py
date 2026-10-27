@@ -57,6 +57,10 @@ def main() -> int:
         "--profile-jar", action="append", default=[], type=parse_profile_artifact,
         metavar="PROFILE_ID=PATH", help="stage a firmware-specific Java overlay (repeatable)",
     )
+    ap.add_argument(
+        "--audio-probe", action="store_true",
+        help="add the read-only sq5_aa_upmix_probe SD-root marker",
+    )
     args = ap.parse_args()
 
     profiles = {}
@@ -88,6 +92,7 @@ def main() -> int:
         "config_tool": native / "config_tool",
         "maneuver_render": ROOT / "build/maneuver_render",
         "flag_atlas.rgba": ROOT / "maneuver_render/resources/flag_atlas.rgba",
+        "scene_masknet_c.bin": ROOT / "models/scene-masknet-c/scene_masknet_c.bin",
         "gal_startup.sh": ROOT / "android_auto/deploy/gal_startup_standalone.sh",
         "sq5_luka_monitor.sh": ROOT / "android_auto/deploy/sq5_luka_monitor.sh",
         "sq5_luka_processes.sh": ROOT / "android_auto/deploy/sq5_luka_processes.sh",
@@ -150,12 +155,17 @@ def main() -> int:
         crc, size = cksum(destination)
         manifest.append(f"{crc} {size} {name}\n")
     (payload / "manifest.cksum").write_text("".join(manifest), encoding="ascii", newline="\n")
+    if args.audio_probe:
+        (out / "sq5_aa_upmix_probe").write_text("", encoding="ascii")
     (out / "README.txt").write_text(
-        "Copy install_AndroidAuto_MoreIncredibleBash into the M.I.B. SD-card root.\n"
+        "Copy this folder's contents into the M.I.B. SD-card root.\n"
         "Run the custom script once with no marker for a read-only firmware/profile audit.\n"
         "Create mib2q_aa_install in the SD-card root and run again to install.\n"
         "Unknown, incomplete and pending-native profiles are refused without modifying the unit.\n"
-        "Create mib2q_aa_uninstall instead to restore the saved configuration.\n",
+        "Create mib2q_aa_uninstall instead to restore the saved configuration.\n"
+        "Rerunning the custom script saves current Android Auto logs under mib2q-aa-logs on the SD card.\n"
+        + ("sq5_aa_upmix_probe is included: it logs media QSA limits and cannot alter audio.\n"
+           if args.audio_probe else ""),
         encoding="utf-8", newline="\n",
     )
     print(f"Staged {out}")

@@ -27,7 +27,7 @@ JAR=$(rooted /mnt/app/eso/hmi/lsd/jars/mib2q_android_auto_cluster.jar)
 GAL=$(rooted /mnt/app/eso/bin/apps/gal)
 RECEIVER=$(rooted /mnt/app/eso/lib/libautoreceiver.so)
 LSD=$(rooted /ifs/lsd.jxe)
-FILES="libsq5_cluster_live.so cluster-player maneuver_render flag_atlas.rgba gal_startup.sh
+FILES="libsq5_cluster_live.so cluster-player maneuver_render flag_atlas.rgba scene_masknet_c.bin gal_startup.sh
 sq5_luka_monitor.sh sq5_luka_processes.sh sq5_luka_cleanup.sh"
 
 size_of() { set -- $(ls -l "$1" 2>/dev/null); echo ${5:-0}; }
@@ -44,7 +44,7 @@ verify_payload() {
         [ -z "${extra:-}" ] || fail "malformed manifest line for $name"
         case "$name" in *..*|/*|*\\*) fail "unsafe manifest entry $name";; esac
         case "$name" in
-            libsq5_cluster_live.so|cluster-player|maneuver_render|flag_atlas.rgba|gal_startup.sh|\
+            libsq5_cluster_live.so|cluster-player|maneuver_render|flag_atlas.rgba|scene_masknet_c.bin|gal_startup.sh|\
             sq5_luka_monitor.sh|sq5_luka_processes.sh|sq5_luka_cleanup.sh|\
             config_tool|profiles.list) core=$((core+1));;
             profiles/*/mib2q_android_auto_cluster.jar) jars=$((jars+1));;
@@ -53,7 +53,7 @@ verify_payload() {
         [ "$(sum_of "$RES/$name")" = "$crc $bytes" ] || fail "payload checksum $name"
         count=$((count+1))
     done < "$RES/manifest.cksum"
-    [ "$core" = 10 ] || fail "manifest has $core common/profile-index files, expected 10"
+    [ "$core" = 11 ] || fail "manifest has $core common/profile-index files, expected 11"
     [ "$jars" -ge 1 ] || fail "manifest has no firmware Java payload"
     [ "$count" = $((core+jars)) ] || fail "manifest entry accounting failed"
 }
@@ -122,6 +122,21 @@ audit() {
     echo "  ~ $CFG: children.gal.exec/path only"
     echo "  = gal, libautoreceiver.so, lsd.jxe and gal.json remain byte-identical"
     echo "  = uninstall restores the saved configuration and removes only the added files"
+}
+
+collect_logs() {
+    tmp=$(rooted /tmp)
+    stamp=$(date +%Y%m%d_%H%M%S 2>/dev/null || echo unknown)
+    run=$SD/mib2q-aa-logs/run-$stamp-$$
+    count=0
+    for src in "$tmp"/mib2q_aa_startup.log "$tmp"/sq5_cluster_player.log \
+               "$tmp"/sq5_luka_wrapper.log "$tmp"/maneuver_render.log \
+               "$tmp"/sq5_cluster_live-hook-*.log; do
+        [ -f "$src" ] || continue
+        [ "$count" -gt 0 ] || mkdir -p "$run" || return 0
+        cp "$src" "$run/${src##*/}" 2>/dev/null && count=$((count+1))
+    done
+    [ "$count" -eq 0 ] || echo "Saved $count Android Auto log(s) to $run"
 }
 
 put() {
@@ -195,6 +210,7 @@ uninstall_it() {
 }
 
 audit
+collect_logs
 if [ -f "$SD/mib2q_aa_install" ] && [ -f "$SD/mib2q_aa_uninstall" ]; then
     fail "both action markers are present; keep only one"
 elif [ -f "$SD/mib2q_aa_install" ]; then

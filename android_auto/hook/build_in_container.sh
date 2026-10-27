@@ -96,7 +96,14 @@ sed -i 's#"1920x1080@30 hmargin=473 band=1920x607"#"1920x1080@30 margins=480x540
 sed -i 's#access("/fs/sda0/sq5_cluster_720",F_OK)!=0#live_res()==3#g' live_hook.c
 sed -i '0,/^#include/s//int live_res(void);\n#include/' live_hook.c
 [ "$(grep -c 'live_res()==3' live_hook.c)" = 2 ]
-$CC -O2 -std=gnu99 -Wall -Wextra -Werror -fPIC -shared live_hook.c transport.c unexpected.c uiconfig.c navxlate.c rotary.c versionfix.c -o libsq5_cluster_live.so -lc
+$CC -O2 -ftree-vectorize -march=armv7-a -mfloat-abi=softfp -mfpu=neon \
+    -std=gnu99 -Wall -Wextra -Werror -fPIC -shared \
+    -I/src/hook -I/src/toolchain/qnx65-abi/include \
+    live_hook.c transport.c unexpected.c uiconfig.c navxlate.c rotary.c versionfix.c audio_upmix.c \
+    /src/hook/audio/stereo_upmix.c /src/hook/audio/scene_engine_math.c \
+    /src/hook/audio/scene_clusters.c /src/hook/audio/scene_engine.c \
+    /src/hook/audio/scene_mask.c /src/hook/audio/scene_mask_worker.c \
+    -o libsq5_cluster_live.so -lc -lm
 sed -e 's/probe_startup.sh/gal_startup.sh/g' -e 's@sq5_cluster_probe@sq5_android_auto@g' config_tool.c > live_config.c
 $CC -O2 -std=gnu99 -Wall -Wextra -Werror live_config.c -o config_tool -lc
 $CC -O2 -std=gnu99 -Wall -Wextra jarpatch.c -o jarpatch -lc

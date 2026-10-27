@@ -23,6 +23,20 @@ cc -std=gnu99 -O2 -Wall -Wextra -Werror -pedantic -Ihook \
     hook/audio/scene_mask_worker.c -lm -lpthread -o "$OUT/upmix"
 "$OUT/upmix"
 
+printf '%-32s ' android_auto_upmix_policy_test
+cc -std=c99 -O2 -Wall -Wextra -Werror -pedantic -I. \
+    tests/android_auto_upmix_policy_test.c -o "$OUT/aa_upmix_policy"
+"$OUT/aa_upmix_policy"
+
+printf '%-32s ' android_auto_upmix_interposer_test
+cc -std=gnu99 -O1 -g -Wall -Wextra -Werror \
+    -Wno-unused-function -Wno-unused-parameter -Itests/mocks -Ihook \
+    tests/android_auto_upmix_interposer_test.c \
+    hook/audio/stereo_upmix.c hook/audio/scene_engine_math.c \
+    hook/audio/scene_clusters.c hook/audio/scene_engine.c hook/audio/scene_mask.c \
+    hook/audio/scene_mask_worker.c -lpthread -lm -o "$OUT/aa_upmix_interposer"
+"$OUT/aa_upmix_interposer"
+
 printf '%-32s ' scene_centre_test
 cc -std=gnu99 -O2 -ffp-contract=off -Wall -Wextra -Werror -pedantic -Ihook \
     tests/scene_centre_test.c hook/audio/scene_engine_math.c hook/audio/scene_clusters.c hook/audio/scene_engine.c \
