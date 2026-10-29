@@ -104,6 +104,16 @@ $CC -O2 -ftree-vectorize -march=armv7-a -mfloat-abi=softfp -mfpu=neon \
     /src/hook/audio/scene_clusters.c /src/hook/audio/scene_engine.c \
     /src/hook/audio/scene_mask.c /src/hook/audio/scene_mask_worker.c \
     -o libsq5_cluster_live.so -lc -lm
+for symbol in snd_pcm_open_name snd_pcm_channel_info snd_pcm_plugin_info \
+    snd_pcm_plugin_params snd_pcm_plugin_setup snd_pcm_plugin_prepare \
+    snd_pcm_plugin_flush snd_pcm_channel_status snd_pcm_plugin_status \
+    snd_pcm_plugin_write snd_pcm_write snd_pcm_close; do
+    $RE -Ws libsq5_cluster_live.so | grep -Eq "[[:space:]]${symbol}$" || {
+        echo "ERROR: missing exported QSA interposer: $symbol" >&2
+        exit 1
+    }
+done
+echo 'QSA interposer export set: PASS'
 sed -e 's/probe_startup.sh/gal_launcher/g' -e 's@sq5_cluster_probe@sq5_android_auto@g' config_tool.c > live_config.c
 $CC -O2 -std=gnu99 -Wall -Wextra -Werror live_config.c -o config_tool -lc
 $CC -O2 -std=gnu99 -Wall -Wextra -Werror /src/android_auto/hook/src/gal_launcher.c -o gal_launcher -lc

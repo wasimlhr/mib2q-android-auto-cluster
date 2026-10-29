@@ -36,9 +36,17 @@ docker run --rm --platform=linux/amd64 \
             /src/hook/audio/scene_mask.c \
             /src/hook/audio/scene_mask_worker.c \
             -o libsq5_cluster_live.so -lc -lm
-        arm-unknown-nto-qnx6.5.0eabi-readelf -Ws \
-            libsq5_cluster_live.so |
-            grep -E "snd_pcm_plugin_(prepare|flush)|snd_pcm_(plugin_)?write"
+        for symbol in snd_pcm_open_name snd_pcm_channel_info snd_pcm_plugin_info \
+            snd_pcm_plugin_params snd_pcm_plugin_setup snd_pcm_plugin_prepare \
+            snd_pcm_plugin_flush snd_pcm_channel_status snd_pcm_plugin_status \
+            snd_pcm_plugin_write snd_pcm_write snd_pcm_close; do
+            arm-unknown-nto-qnx6.5.0eabi-readelf -Ws libsq5_cluster_live.so |
+                grep -Eq "[[:space:]]${symbol}$" || {
+                    echo "ERROR: missing exported QSA interposer: $symbol" >&2
+                    exit 1
+                }
+        done
+        echo "QSA interposer export set: PASS"
         cp libsq5_cluster_live.so /src/build/android_auto/libsq5_cluster_live.so
     '
 

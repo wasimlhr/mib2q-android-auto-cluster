@@ -17,10 +17,16 @@ typedef struct {
 } snd_pcm_channel_setup_t;
 typedef struct {
     int channel, min_voices, max_voices, min_rate, max_rate;
-    int min_fragment_size, max_fragment_size;
+    int max_buffer_size, min_fragment_size, max_fragment_size;
+    int fragment_align, fifo_size, transfer_block_size;
     unsigned formats;
 } snd_pcm_channel_info_t;
-typedef struct { int channel, status; unsigned underrun; } snd_pcm_channel_status_t;
+typedef struct {
+    int channel, mode, status;
+    uint32_t scount;
+    int frag, count, free, underrun;
+    uint32_t subbuffered;
+} snd_pcm_channel_status_t;
 #define SND_PCM_CHANNEL_PLAYBACK 0
 #define SND_PCM_CHANNEL_CAPTURE 1
 #define SND_PCM_MODE_UNKNOWN 0

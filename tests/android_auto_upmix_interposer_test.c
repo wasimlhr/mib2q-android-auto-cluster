@@ -16,6 +16,8 @@ static snd_pcm_t media = { 1 };
 static snd_pcm_channel_setup_t native_setup_state;
 static unsigned caps_voices = 2;
 static unsigned caps_fragment = 3072;
+static unsigned caps_min_fragment = 3072;
+static unsigned caps_buffer = 0x7800;
 static unsigned native_params_calls;
 static unsigned native_write_calls;
 static size_t native_write_bytes;
@@ -42,9 +44,28 @@ static int native_info(snd_pcm_t *handle, snd_pcm_channel_info_t *info)
     info->min_voices = 2;
     info->max_voices = (int)caps_voices;
     info->min_rate = info->max_rate = 48000;
-    info->min_fragment_size = 3072;
+    info->min_fragment_size = (int)caps_min_fragment;
     info->max_fragment_size = (int)caps_fragment;
+    info->max_buffer_size = (int)caps_buffer;
+    info->fragment_align = 4;
     info->formats = 1u << SND_PCM_SFMT_S16_LE;
+    return 0;
+}
+
+static int native_plugin_info(snd_pcm_t *handle, snd_pcm_channel_info_t *info)
+{
+    /* libasound's plugin info reads the channel record through its PLT; the
+     * interposer must translate the outer result exactly once. */
+    return snd_pcm_channel_info(handle, info);
+}
+
+static int native_status(snd_pcm_t *handle, snd_pcm_channel_status_t *status)
+{
+    assert(handle == &media && status);
+    status->status = SND_PCM_STATUS_RUNNING;
+    status->count = 9216;
+    status->free = 18432;
+    status->scount = 92160;
     return 0;
 }
 
@@ -120,6 +141,9 @@ static void *test_dlsym(void *scope, const char *name)
 #define SYMBOL(n, f) if (!strcmp(name, n)) return (void *)(uintptr_t)(f)
     SYMBOL("snd_pcm_open_name", native_open);
     SYMBOL("snd_pcm_channel_info", native_info);
+    SYMBOL("snd_pcm_plugin_info", native_plugin_info);
+    SYMBOL("snd_pcm_channel_status", native_status);
+    SYMBOL("snd_pcm_plugin_status", native_status);
     SYMBOL("snd_pcm_plugin_params", native_params);
     SYMBOL("snd_pcm_plugin_setup", native_setup);
     SYMBOL("snd_pcm_plugin_prepare", native_prepare);
@@ -154,7 +178,10 @@ int main(void)
     snd_pcm_t *handle = NULL;
     snd_pcm_channel_params_t params;
     snd_pcm_channel_setup_t setup;
+    snd_pcm_channel_info_t info;
+    snd_pcm_channel_status_t status;
     int16_t pcm[768 * 2] = { 0 };
+    int16_t gal_packet[2048 * 2] = { 0 };
     FILE *level_file;
 
     assert(setenv("SQ5_AA_UPMIX", "on", 1) == 0);
@@ -167,16 +194,51 @@ int main(void)
     assert(snd_pcm_open_name(&handle, "mpl6_gal_ent", SND_PCM_OPEN_PLAYBACK) == 0);
     assert(handle == &media);
 
-    /* Stock MU0918 caps: pass GAL's exact stereo request through. */
+    /* Stock MU0918 caps: GAL's info and its exact stereo request pass through. */
+    memset(&info, 0, sizeof(info));
+    assert(snd_pcm_channel_info(handle, &info) == 0);
+    assert(info.max_voices == 2 && info.max_fragment_size == 3072 && aa.infos == 0);
     params = stereo_params();
     assert(snd_pcm_plugin_params(handle, &params) == 0);
     assert(native_setup_state.format.voices == 2);
     assert(native_setup_state.buf.block.frag_size == 9216);
     assert(!aa.expanded);
+    memset(&status, 0, sizeof(status));
+    assert(snd_pcm_plugin_status(handle, &status) == 0);
+    assert(status.count == 9216 && aa.statuses == 0);
 
-    /* Validated/patched caps: expand QSA only; GAL still sees stereo. */
+    /* Patched MU0918 caps: GAL is shown the stereo device it is served, so it
+     * requests the stock 3072-byte period (car run 310 failed on 9216). */
     caps_voices = 6;
-    caps_fragment = 9216;
+    caps_fragment = caps_min_fragment = 9216;
+    caps_buffer = 0x16800;
+    memset(&info, 0, sizeof(info));
+    assert(snd_pcm_channel_info(handle, &info) == 0);
+    assert(info.min_voices == 2 && info.max_voices == 2);
+    assert(info.min_fragment_size == 3072 && info.max_fragment_size == 3072);
+    assert(info.max_buffer_size == 30720 && info.fragment_align == 4);
+    memset(&info, 0, sizeof(info));
+    assert(snd_pcm_plugin_info(handle, &info) == 0);
+    assert(info.max_voices == 2 && info.max_fragment_size == 3072);
+    assert(aa.infos == 2);
+    params = stereo_params();
+    params.buf.block.frag_size = info.max_fragment_size;
+    assert(snd_pcm_plugin_params(handle, &params) == 0);
+    assert(aa.expanded && aa.source_fragment == 3072 && aa.target_fragment == 9216);
+    assert(native_setup_state.format.voices == 6);
+    assert(native_setup_state.buf.block.frag_size == 9216);
+    memset(&setup, 0, sizeof(setup));
+    assert(snd_pcm_plugin_setup(handle, &setup) == 0);
+    assert(setup.format.voices == 2 && setup.buf.block.frag_size == 3072);
+    memset(&status, 0, sizeof(status));
+    assert(snd_pcm_plugin_status(handle, &status) == 0);
+    assert(status.status == SND_PCM_STATUS_RUNNING);
+    assert(status.count == 3072 && status.free == 6144 && status.scount == 30720);
+    memset(&status, 0, sizeof(status));
+    assert(snd_pcm_channel_status(handle, &status) == 0);
+    assert(status.count == 3072 && aa.statuses == 2);
+
+    /* An older GAL request seeded with the physical maximum still expands. */
     params = stereo_params();
     /* MU0918 GAL leaves these at default values.  The exact playback handle
      * is already known, so the interposer must normalize its private copy. */
@@ -206,6 +268,12 @@ int main(void)
     assert(native_write_calls == 1 && native_write_bytes == 9216);
     assert(snd_pcm_write(handle, pcm, sizeof(pcm)) == (ssize_t)sizeof(pcm));
     assert(native_write_calls == 2 && native_write_bytes == 9216);
+    /* Run 310 delivered 8202-byte channel messages: a 10-byte envelope plus
+     * 8192 bytes/2048 stereo frames of PCM.  The DSP processes this in two
+     * bounded calls, but QSA must receive one expanded 24576-byte write. */
+    assert(snd_pcm_plugin_write(handle, gal_packet, sizeof(gal_packet)) ==
+           (ssize_t)sizeof(gal_packet));
+    assert(native_write_calls == 3 && native_write_bytes == 24576);
     assert(snd_pcm_plugin_flush(handle, SND_PCM_CHANNEL_CAPTURE) == 0);
     assert(native_flush_calls == 1 && aa.flushes == 1);
 
@@ -216,8 +284,8 @@ int main(void)
     assert(snd_pcm_plugin_params(handle, &params) == 0);
     assert(!aa.expanded && native_setup_state.format.voices == 2);
     assert(snd_pcm_plugin_write(handle, pcm, sizeof(pcm)) == (ssize_t)sizeof(pcm));
-    assert(native_write_calls == 3 && native_write_bytes == sizeof(pcm));
-    assert(native_params_calls == 3);
+    assert(native_write_calls == 4 && native_write_bytes == sizeof(pcm));
+    assert(native_params_calls == 4);
     assert(snd_pcm_close(handle) == 0);
     assert(native_flush_calls == 2);
     assert(unlink(level_path) == 0);

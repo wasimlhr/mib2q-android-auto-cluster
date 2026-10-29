@@ -28,6 +28,16 @@
 #define SQ5_AA_LEVEL_FILE_ENV "SQ5_AA_UPMIX_LEVEL_FILE"
 #define SQ5_AA_LEVEL_FILE "/tmp/carplay_upmix_level"
 #define SQ5_AA_LEVEL_POLL_WRITES 64u
+/* Luka's mature bridge accepts a large caller write and lets QSA split it
+ * across physical periods.  GAL delivers Android Auto media in 8192-byte
+ * stereo packets (2048 frames on run 310), which is larger than one DSP
+ * invocation and larger than the 3072-byte logical QSA period.  Keep one
+ * bounded output buffer, process it in DSP-sized pieces, then make the same
+ * single QSA call GAL expects. */
+/* 256 KiB is more than ten times the 24,576-byte expanded packet observed on
+ * the car, without adding Luka's full 1 MiB bridge buffer to every GAL
+ * process. */
+#define SQ5_AA_UPMIX_MAX_OUTPUT_BYTES (256u * 1024u)
 /* Luka's validated MHI2Q path keeps the caller's low-water mark but requires
  * at least eight widened periods in the QSA ring.  The patched MU0918 mpl6
  * record permits ten 9216-byte periods. */
@@ -40,6 +50,7 @@ typedef int (*open_fn)(snd_pcm_t **, char *, int);
 typedef int (*params_fn)(snd_pcm_t *, snd_pcm_channel_params_t *);
 typedef int (*setup_fn)(snd_pcm_t *, snd_pcm_channel_setup_t *);
 typedef int (*info_fn)(snd_pcm_t *, snd_pcm_channel_info_t *);
+typedef int (*status_fn)(snd_pcm_t *, snd_pcm_channel_status_t *);
 typedef int (*prepare_fn)(snd_pcm_t *, int);
 typedef int (*flush_fn)(snd_pcm_t *, int);
 typedef ssize_t (*write_fn)(snd_pcm_t *, const void *, size_t);
@@ -64,10 +75,12 @@ static struct {
     int dsp_ready;
     struct spa_scene_mask_worker mask_worker;
     int mask_worker_started;
-    int16_t output[SQ5_AA_UPMIX_MAX_FRAMES * SQ5_AA_UPMIX_TARGET_CHANNELS];
+    int16_t output[SQ5_AA_UPMIX_MAX_OUTPUT_BYTES / sizeof(int16_t)];
     uint64_t writes;
     uint64_t prepares;
     uint64_t flushes;
+    uint64_t infos;
+    uint64_t statuses;
     uint64_t failures;
     uint64_t short_writes;
     int active_level;
@@ -238,12 +251,83 @@ HOOK_EXPORT int snd_pcm_open_name(snd_pcm_t **handle, char *name, int mode)
         aa.source_channels = aa.target_channels = 0;
         aa.source_fragment = aa.target_fragment = 0;
         aa.writes = aa.prepares = aa.flushes = 0;
+        aa.infos = aa.statuses = 0;
         aa.failures = aa.short_writes = 0;
         pthread_mutex_unlock(&aa.state_lock);
         pthread_mutex_unlock(&aa.io_lock);
         probe_log("aa_upmix.open handle=%p mode=0x%x", *handle, mode);
     }
     return result;
+}
+
+static int32_t stereo_bytes(int32_t target_bytes)
+{
+    return target_bytes > 0 ?
+           (int32_t)sq5_aa_upmix_source_bytes((size_t)target_bytes) : target_bytes;
+}
+
+/* GAL sizes its media period from the channel info.  On the patched PCM6
+ * driver it read six voices and a 9216-byte maximum, asked for 9216-byte
+ * stereo periods, was given 3072 and closed the sink before its first write
+ * (car run 310: prepare ok, writes=0, every ~3 s).  Show GAL the stereo
+ * device the upmix serves instead: two voices and every byte size scaled
+ * from PCM6 to its stereo source, i.e. the stock 3072-byte period.  The
+ * params interposer and libasound itself still read the physical record. */
+static int stereo_info(snd_pcm_t *handle, snd_pcm_channel_info_t *info,
+                       info_fn real, const char *api)
+{
+    snd_pcm_channel_info_t physical;
+    int tracked, result;
+    uint64_t call_number;
+
+    if (!real) return -EIO;
+    if (inside_real_io()) return real(handle, info);
+    pthread_mutex_lock(&aa.state_lock);
+    tracked = handle && handle == aa.handle;
+    pthread_mutex_unlock(&aa.state_lock);
+    if (!tracked || !info || current_mode() != AA_UPMIX_ON) return real(handle, info);
+
+    /* snd_pcm_plugin_info may call snd_pcm_channel_info; translate once. */
+    set_real_io(1);
+    result = real(handle, info);
+    set_real_io(0);
+    if (result || info->max_voices < SQ5_AA_UPMIX_TARGET_CHANNELS ||
+        info->max_fragment_size <
+            SQ5_AA_UPMIX_TARGET_CHANNELS * SQ5_AA_UPMIX_SAMPLE_BYTES)
+        return result;
+    physical = *info;
+    info->min_voices = info->max_voices = SQ5_AA_UPMIX_SOURCE_CHANNELS;
+    info->min_fragment_size = stereo_bytes(physical.min_fragment_size);
+    info->max_fragment_size = stereo_bytes(physical.max_fragment_size);
+    info->max_buffer_size = stereo_bytes(physical.max_buffer_size);
+    info->fifo_size = stereo_bytes(physical.fifo_size);
+    info->transfer_block_size = stereo_bytes(physical.transfer_block_size);
+    pthread_mutex_lock(&aa.state_lock);
+    call_number = ++aa.infos;
+    pthread_mutex_unlock(&aa.state_lock);
+    if (call_number <= 4)
+        probe_log("aa_upmix.info api=%s n=%llu physical=%d..%dv/%d..%d/buf%d shown=%d..%dv/%d..%d/buf%d align=%d",
+                  api, (unsigned long long)call_number,
+                  physical.min_voices, physical.max_voices,
+                  physical.min_fragment_size, physical.max_fragment_size,
+                  physical.max_buffer_size, info->min_voices, info->max_voices,
+                  info->min_fragment_size, info->max_fragment_size,
+                  info->max_buffer_size, physical.fragment_align);
+    return 0;
+}
+
+HOOK_EXPORT int snd_pcm_channel_info(snd_pcm_t *handle, snd_pcm_channel_info_t *info)
+{
+    static info_fn real;
+    if (!real) real = (info_fn)dlsym(RTLD_NEXT, "snd_pcm_channel_info");
+    return stereo_info(handle, info, real, "channel");
+}
+
+HOOK_EXPORT int snd_pcm_plugin_info(snd_pcm_t *handle, snd_pcm_channel_info_t *info)
+{
+    static info_fn real;
+    if (!real) real = (info_fn)dlsym(RTLD_NEXT, "snd_pcm_plugin_info");
+    return stereo_info(handle, info, real, "plugin");
 }
 
 HOOK_EXPORT int snd_pcm_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_t *params)
@@ -491,12 +575,62 @@ HOOK_EXPORT int snd_pcm_plugin_flush(snd_pcm_t *handle, int channel)
     return result;
 }
 
+/* Keep GAL's queue accounting in the same stereo bytes as its setup.  No
+ * io_lock: a status poll must not wait behind a write blocked in QSA. */
+static int stereo_status(snd_pcm_t *handle, snd_pcm_channel_status_t *status,
+                         status_fn real, const char *api)
+{
+    int expanded, result;
+    int32_t count, free_bytes;
+    uint64_t call_number;
+
+    if (!real) return -EIO;
+    if (inside_real_io()) return real(handle, status);
+    pthread_mutex_lock(&aa.state_lock);
+    expanded = handle && handle == aa.handle && aa.expanded;
+    pthread_mutex_unlock(&aa.state_lock);
+    if (!expanded || !status) return real(handle, status);
+
+    set_real_io(1);
+    result = real(handle, status);
+    set_real_io(0);
+    if (result) return result;
+    count = status->count;
+    free_bytes = status->free;
+    status->count = stereo_bytes(count);
+    status->free = stereo_bytes(free_bytes);
+    status->scount = (uint32_t)sq5_aa_upmix_source_bytes(status->scount);
+    status->subbuffered = (uint32_t)sq5_aa_upmix_source_bytes(status->subbuffered);
+    pthread_mutex_lock(&aa.state_lock);
+    call_number = ++aa.statuses;
+    pthread_mutex_unlock(&aa.state_lock);
+    if (call_number <= 8)
+        probe_log("aa_upmix.status api=%s n=%llu state=%d count=%d->%d free=%d->%d underrun=%d",
+                  api, (unsigned long long)call_number, status->status, count,
+                  status->count, free_bytes, status->free, status->underrun);
+    return 0;
+}
+
+HOOK_EXPORT int snd_pcm_channel_status(snd_pcm_t *handle, snd_pcm_channel_status_t *status)
+{
+    static status_fn real;
+    if (!real) real = (status_fn)dlsym(RTLD_NEXT, "snd_pcm_channel_status");
+    return stereo_status(handle, status, real, "channel");
+}
+
+HOOK_EXPORT int snd_pcm_plugin_status(snd_pcm_t *handle, snd_pcm_channel_status_t *status)
+{
+    static status_fn real;
+    if (!real) real = (status_fn)dlsym(RTLD_NEXT, "snd_pcm_plugin_status");
+    return stereo_status(handle, status, real, "plugin");
+}
+
 static ssize_t upmix_write(snd_pcm_t *handle, const void *buffer, size_t size,
                            write_fn real, const char *api)
 {
-    size_t frames, target_bytes;
+    size_t frames, frame_offset, target_bytes;
     ssize_t written;
-    int expanded, process_result;
+    int expanded;
     uint64_t write_number;
     if (!real) return -EIO;
     /* snd_pcm_plugin_write may call snd_pcm_write internally.  The outer
@@ -510,7 +644,13 @@ static ssize_t upmix_write(snd_pcm_t *handle, const void *buffer, size_t size,
     if (!buffer || size % (SQ5_AA_UPMIX_SOURCE_CHANNELS * SQ5_AA_UPMIX_SAMPLE_BYTES))
         return -EINVAL;
     frames = size / (SQ5_AA_UPMIX_SOURCE_CHANNELS * SQ5_AA_UPMIX_SAMPLE_BYTES);
-    if (!frames || frames > SQ5_AA_UPMIX_MAX_FRAMES) return -EINVAL;
+    if (!frames || frames > SQ5_AA_UPMIX_MAX_OUTPUT_BYTES /
+                            (SQ5_AA_UPMIX_TARGET_CHANNELS *
+                             SQ5_AA_UPMIX_SAMPLE_BYTES)) {
+        probe_log("aa_upmix.write rejected api=%s source_bytes=%u frames=%u reason=capacity",
+                  api, (unsigned)size, (unsigned)frames);
+        return -EINVAL;
+    }
     target_bytes = frames * SQ5_AA_UPMIX_TARGET_CHANNELS * SQ5_AA_UPMIX_SAMPLE_BYTES;
 
     pthread_mutex_lock(&aa.io_lock);
@@ -523,11 +663,26 @@ static ssize_t upmix_write(snd_pcm_t *handle, const void *buffer, size_t size,
             probe_log("aa_upmix.level value=%d source=shared-menu", level);
         }
     }
-    process_result = spa_stereo_upmix_process_s16(&aa.dsp, (const int16_t *)buffer,
-                                                   frames, aa.output, frames);
-    if (process_result != SPA_STEREO_UPMIX_OK) {
-        dry_expand((const int16_t *)buffer, frames, aa.output);
-        aa.failures++;
+    for (frame_offset = 0; frame_offset < frames;
+         frame_offset += SQ5_AA_UPMIX_MAX_FRAMES) {
+        size_t chunk_frames = frames - frame_offset;
+        int chunk_result;
+        if (chunk_frames > SQ5_AA_UPMIX_MAX_FRAMES)
+            chunk_frames = SQ5_AA_UPMIX_MAX_FRAMES;
+        chunk_result = spa_stereo_upmix_process_s16(
+            &aa.dsp,
+            (const int16_t *)buffer + frame_offset * SQ5_AA_UPMIX_SOURCE_CHANNELS,
+            chunk_frames,
+            aa.output + frame_offset * SQ5_AA_UPMIX_TARGET_CHANNELS,
+            chunk_frames);
+        if (chunk_result != SPA_STEREO_UPMIX_OK) {
+            dry_expand(
+                (const int16_t *)buffer +
+                    frame_offset * SQ5_AA_UPMIX_SOURCE_CHANNELS,
+                chunk_frames,
+                aa.output + frame_offset * SQ5_AA_UPMIX_TARGET_CHANNELS);
+            aa.failures++;
+        }
     }
     write_number = ++aa.writes;
     pthread_mutex_unlock(&aa.state_lock);
@@ -566,7 +721,7 @@ HOOK_EXPORT int snd_pcm_close(snd_pcm_t *handle)
 {
     static close_fn real;
     int tracked, result;
-    uint64_t writes, prepares, flushes, failures, short_writes;
+    uint64_t writes, prepares, flushes, infos, statuses, failures, short_writes;
     if (!real) real = (close_fn)dlsym(RTLD_NEXT, "snd_pcm_close");
     if (!real) return -1;
     pthread_mutex_lock(&aa.state_lock);
@@ -579,6 +734,7 @@ HOOK_EXPORT int snd_pcm_close(snd_pcm_t *handle)
     set_real_io(0);
     pthread_mutex_lock(&aa.state_lock);
     writes = aa.writes; prepares = aa.prepares; flushes = aa.flushes;
+    infos = aa.infos; statuses = aa.statuses;
     failures = aa.failures; short_writes = aa.short_writes;
     stop_dsp_locked();
     aa.handle = NULL;
@@ -587,7 +743,8 @@ HOOK_EXPORT int snd_pcm_close(snd_pcm_t *handle)
     aa.source_fragment = aa.target_fragment = 0;
     pthread_mutex_unlock(&aa.state_lock);
     pthread_mutex_unlock(&aa.io_lock);
-    probe_log("aa_upmix.close result=%d prepares=%llu flushes=%llu writes=%llu dsp_fail=%llu short=%llu", result,
+    probe_log("aa_upmix.close result=%d infos=%llu statuses=%llu prepares=%llu flushes=%llu writes=%llu dsp_fail=%llu short=%llu", result,
+              (unsigned long long)infos, (unsigned long long)statuses,
               (unsigned long long)prepares, (unsigned long long)flushes,
               (unsigned long long)writes, (unsigned long long)failures,
               (unsigned long long)short_writes);
