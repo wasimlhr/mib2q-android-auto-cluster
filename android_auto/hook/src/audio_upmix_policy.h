@@ -75,6 +75,32 @@ static int sq5_aa_upmix_plan(const struct sq5_aa_pcm_geometry *source,
     return 1;
 }
 
+/* deva reports exactly one hardware format, 1 << record[+0x04]: S16_LE on
+ * stock mpl6 and on the 16-bit six-voice record, S32_LE (24 useful bits) on
+ * mpl1 and on the mpl1 mirror.  Bit values match libasound's SND_PCM_FMT_*.
+ * Anything else, including the widened mask snd_pcm_plugin_info returns, is
+ * not a device this bridge understands. */
+enum {
+    SQ5_AA_UPMIX_FMT_S16_LE = 1u << 4,
+    SQ5_AA_UPMIX_FMT_S32_LE = 1u << 12
+};
+
+static size_t sq5_aa_upmix_device_sample_bytes(unsigned formats)
+{
+    return formats == SQ5_AA_UPMIX_FMT_S16_LE ? 2 :
+           formats == SQ5_AA_UPMIX_FMT_S32_LE ? 4 : 0;
+}
+
+/* channel_info and channel_status count hardware bytes; the plugin layer
+ * converts GAL's S16 to the device format.  Express a hardware byte count in
+ * the S16 bytes of the same frames, so PCM6 geometry is one unit everywhere:
+ * the mpl1 record's 0x4800 S32 fragment is QSA's 9216-byte S16 period. */
+static size_t sq5_aa_upmix_client_bytes(size_t device_bytes, size_t device_sample_bytes)
+{
+    return device_sample_bytes ?
+           device_bytes / device_sample_bytes * SQ5_AA_UPMIX_SAMPLE_BYTES : 0;
+}
+
 static size_t sq5_aa_upmix_source_bytes(size_t target_bytes)
 {
     size_t target_frame = SQ5_AA_UPMIX_TARGET_CHANNELS * SQ5_AA_UPMIX_SAMPLE_BYTES;

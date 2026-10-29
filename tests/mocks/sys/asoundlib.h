@@ -31,7 +31,10 @@ typedef struct {
 #define SND_PCM_CHANNEL_CAPTURE 1
 #define SND_PCM_MODE_UNKNOWN 0
 #define SND_PCM_MODE_BLOCK 1
-#define SND_PCM_SFMT_S16_LE 2
+/* QNX 6.5 sys/asound.h values; info.formats carries 1 << these. */
+#define SND_PCM_SFMT_S16_LE 4
+#define SND_PCM_SFMT_S24_LE 8
+#define SND_PCM_SFMT_S32_LE 12
 #define SND_PCM_OPEN_PLAYBACK 1
 #define SND_PCM_START_FULL 1
 #define SND_PCM_STOP_STOP 1

@@ -18,6 +18,7 @@ static unsigned caps_voices = 2;
 static unsigned caps_fragment = 3072;
 static unsigned caps_min_fragment = 3072;
 static unsigned caps_buffer = 0x7800;
+static unsigned caps_formats = 1u << SND_PCM_SFMT_S16_LE;
 static unsigned native_params_calls;
 static unsigned native_write_calls;
 static size_t native_write_bytes;
@@ -46,31 +47,54 @@ static int native_open(snd_pcm_t **handle, char *name, int mode)
 static int native_info(snd_pcm_t *handle, snd_pcm_channel_info_t *info)
 {
     assert(handle == &media);
-    info->min_voices = 2;
+    /* Every MU0918 mpl6 record seen has min == max: 2/2 stock, 6/6 patched. */
+    info->min_voices = (int)caps_voices;
     info->max_voices = (int)caps_voices;
     info->min_rate = info->max_rate = 48000;
     info->min_fragment_size = (int)caps_min_fragment;
     info->max_fragment_size = (int)caps_fragment;
     info->max_buffer_size = (int)caps_buffer;
     info->fragment_align = 4;
-    info->formats = 1u << SND_PCM_SFMT_S16_LE;
+    info->formats = caps_formats;
     return 0;
 }
 
 static int native_plugin_info(snd_pcm_t *handle, snd_pcm_channel_info_t *info)
 {
     /* libasound's plugin info reads the channel record through its PLT; the
-     * interposer must translate the outer result exactly once. */
-    return snd_pcm_channel_info(handle, info);
+     * interposer must translate the outer result exactly once.  QNX 6.5's
+     * snd_pcm_plugin_info then widens formats to every convertible one, so
+     * the sample size must come from the device, not from this mask. */
+    int result = snd_pcm_channel_info(handle, info);
+    if (!result)
+        info->formats |= (1u << SND_PCM_SFMT_S16_LE) | (1u << SND_PCM_SFMT_S32_LE);
+    return result;
 }
 
-static int native_status(snd_pcm_t *handle, snd_pcm_channel_status_t *status)
+static unsigned device_sample_bytes(void)
+{
+    return caps_formats == (1u << SND_PCM_SFMT_S32_LE) ? 4 : 2;
+}
+
+/* Plugin status counts the S16 bytes the plugin writes: 768 PCM6 frames
+ * queued, 1536 free, 7680 played. */
+static int native_plugin_status(snd_pcm_t *handle, snd_pcm_channel_status_t *status)
 {
     assert(handle == &media && status);
     status->status = SND_PCM_STATUS_RUNNING;
     status->count = 9216;
     status->free = 18432;
     status->scount = 92160;
+    return 0;
+}
+
+/* Channel status counts the same frames in hardware bytes. */
+static int native_channel_status(snd_pcm_t *handle, snd_pcm_channel_status_t *status)
+{
+    assert(native_plugin_status(handle, status) == 0);
+    status->count = (int)(status->count / 2 * device_sample_bytes());
+    status->free = (int)(status->free / 2 * device_sample_bytes());
+    status->scount = status->scount / 2 * device_sample_bytes();
     return 0;
 }
 
@@ -167,8 +191,8 @@ static void *test_dlsym(void *scope, const char *name)
     SYMBOL("snd_pcm_open_name", native_open);
     SYMBOL("snd_pcm_channel_info", native_info);
     SYMBOL("snd_pcm_plugin_info", native_plugin_info);
-    SYMBOL("snd_pcm_channel_status", native_status);
-    SYMBOL("snd_pcm_plugin_status", native_status);
+    SYMBOL("snd_pcm_channel_status", native_channel_status);
+    SYMBOL("snd_pcm_plugin_status", native_plugin_status);
     SYMBOL("snd_pcm_file_descriptor", native_fd);
     SYMBOL("devctl", native_devctl);
     SYMBOL("snd_pcm_plugin_params", native_params);
@@ -224,15 +248,18 @@ int main(void)
     assert(handle == &media);
     assert(snd_pcm_file_descriptor(handle, SND_PCM_CHANNEL_PLAYBACK) == 73);
     assert(aa.media_fd == 73);
-    sad[1] = 1;
-    sad[3] = SQ5_AA_SAD_STEREO;
-    sad[12] = SQ5_AA_SAMPLE_WIDTH;
-    store_le32(sad + 8, SQ5_AA_STEREO_BITRATE);
+    /* GAL/deva layout: pcm_conf (asad) +1, codec_type +3, width +4,
+     * sample rate +8, bit_rate +16. */
+    sad[1] = SQ5_AA_SAD_STEREO;
+    sad[3] = 1;
+    sad[4] = SQ5_AA_SAMPLE_WIDTH;
+    store_le32(sad + 8, 48000);
+    store_le32(sad + 16, SQ5_AA_STEREO_BITRATE);
 
     /* The header must remain stereo until the physical six-channel setup has
      * succeeded. This prevents a failed upmix negotiation from lying to CSD. */
     assert(devctl(73, (int)SQ5_AA_SAD_SET_COMMAND, sad, sizeof(sad), NULL) == 0);
-    assert(native_devctl_calls == 1 && native_devctl_payload[3] == SQ5_AA_SAD_STEREO);
+    assert(native_devctl_calls == 1 && native_devctl_payload[1] == SQ5_AA_SAD_STEREO);
     assert(aa.sad_rewrites == 0);
 
     /* Stock MU0918 caps: GAL's info and its exact stereo request pass through. */
@@ -262,37 +289,81 @@ int main(void)
     assert(snd_pcm_plugin_info(handle, &info) == 0);
     assert(info.max_voices == 2 && info.max_fragment_size == 3072);
     assert(aa.infos == 2);
+
+    /* mpl1-mirrored MU0918 caps: the record mpl1 attaches with, S32 voices
+     * and a 0x4800 fragment.  Those are the same 768 frames, so GAL must
+     * still be shown the 3072-byte stereo period, through either API. */
+    caps_formats = 1u << SND_PCM_SFMT_S32_LE;
+    caps_fragment = caps_min_fragment = 0x4800;
+    caps_buffer = 0x2D000;
+    memset(&info, 0, sizeof(info));
+    assert(snd_pcm_channel_info(handle, &info) == 0);
+    assert(info.min_voices == 2 && info.max_voices == 2);
+    assert(info.min_fragment_size == 3072 && info.max_fragment_size == 3072);
+    assert(info.max_buffer_size == 30720);
+    memset(&info, 0, sizeof(info));
+    assert(snd_pcm_plugin_info(handle, &info) == 0);
+    assert(info.max_voices == 2 && info.max_fragment_size == 3072);
+    assert(info.max_buffer_size == 30720);
+    assert(aa.infos == 4);
+
+    /* The last params on this handle fell back to stock stereo, so a header
+     * sent now stays stereo: QSA's own 2 -> 6 conversion would put L and R
+     * into the centre, LFE and surrounds behind a 5.1 declaration. */
+    assert(!aa.expanded && aa.six_voice_device && aa.params_bypassed);
+    assert(devctl(73, (int)SQ5_AA_SAD_SET_COMMAND, sad, sizeof(sad), NULL) == 0);
+    assert(native_devctl_calls == 2 && native_devctl_payload[1] == SQ5_AA_SAD_STEREO);
+    assert(aa.sad_rewrites == 0 && aa.sad_saved && !aa.sad_declared_5_1);
+
+    /* A device format the bridge does not know is shown unchanged. */
+    caps_formats = 1u << SND_PCM_SFMT_S24_LE;
+    memset(&info, 0, sizeof(info));
+    assert(snd_pcm_channel_info(handle, &info) == 0);
+    assert(info.max_voices == 6 && info.max_fragment_size == 0x4800 && aa.infos == 4);
+    params = stereo_params();
+    assert(snd_pcm_plugin_params(handle, &params) == 0);
+    assert(!aa.expanded && native_setup_state.format.voices == 2);
+    assert(!aa.six_voice_device);
+    caps_formats = 1u << SND_PCM_SFMT_S32_LE;
+
     params = stereo_params();
     params.buf.block.frag_size = info.max_fragment_size;
     assert(snd_pcm_plugin_params(handle, &params) == 0);
     assert(aa.expanded && aa.source_fragment == 3072 && aa.target_fragment == 9216);
     assert(native_setup_state.format.voices == 6);
     assert(native_setup_state.buf.block.frag_size == 9216);
+    /* The upmix engaged after GAL had already stored a stereo header: the
+     * saved header is re-sent as 5.1 before playback starts. */
+    assert(native_devctl_calls == 3 && native_devctl_fd == 73);
+    assert(native_devctl_payload[1] == SQ5_AA_SAD_5_1);
+    assert(native_devctl_payload[4] == SQ5_AA_5_1_SAMPLE_WIDTH);
+    assert(aa.sad_declared_5_1 && !aa.params_bypassed);
 
     /* Exact stock GAL metadata becomes a truthful six-slot declaration. The
      * caller's buffer is immutable from GAL's point of view. */
     assert(devctl(73, (int)SQ5_AA_SAD_SET_COMMAND, sad, sizeof(sad), NULL) == 0);
-    assert(native_devctl_calls == 2 && native_devctl_fd == 73);
+    assert(native_devctl_calls == 4 && native_devctl_fd == 73);
     assert(native_devctl_command == SQ5_AA_SAD_SET_COMMAND);
     assert(native_devctl_bytes == SQ5_AA_SAD_BYTES);
-    assert(native_devctl_payload[3] == SQ5_AA_SAD_5_1);
-    assert(load_le32(native_devctl_payload + 8) == SQ5_AA_5_1_BITRATE);
-    assert(native_devctl_payload[12] == SQ5_AA_SAMPLE_WIDTH);
-    assert(sad[3] == SQ5_AA_SAD_STEREO);
-    assert(load_le32(sad + 8) == SQ5_AA_STEREO_BITRATE);
+    assert(native_devctl_payload[1] == SQ5_AA_SAD_5_1);
+    assert(load_le32(native_devctl_payload + 16) == SQ5_AA_5_1_BITRATE);
+    assert(native_devctl_payload[4] == SQ5_AA_5_1_SAMPLE_WIDTH);
+    assert(sad[1] == SQ5_AA_SAD_STEREO && sad[4] == SQ5_AA_SAMPLE_WIDTH);
+    assert(native_devctl_payload[3] == 1 && load_le32(native_devctl_payload + 8) == 48000);
+    assert(load_le32(sad + 16) == SQ5_AA_STEREO_BITRATE);
     assert(aa.sad_rewrites == 1);
 
     /* Wrong descriptor, command, or payload is never rewritten. */
     assert(devctl(74, (int)SQ5_AA_SAD_SET_COMMAND, sad, sizeof(sad), NULL) == 0);
-    assert(native_devctl_payload[3] == SQ5_AA_SAD_STEREO);
+    assert(native_devctl_payload[1] == SQ5_AA_SAD_STEREO);
     memcpy(wrong_sad, sad, sizeof(wrong_sad));
     wrong_sad[1] = 2;
     assert(devctl(73, (int)SQ5_AA_SAD_SET_COMMAND,
                   wrong_sad, sizeof(wrong_sad), NULL) == 0);
-    assert(native_devctl_payload[3] == SQ5_AA_SAD_STEREO);
+    assert(native_devctl_payload[1] == 2);
     assert(devctl(73, (int)(SQ5_AA_SAD_SET_COMMAND - 1u),
                   sad, sizeof(sad), NULL) == 0);
-    assert(native_devctl_payload[3] == SQ5_AA_SAD_STEREO);
+    assert(native_devctl_payload[1] == SQ5_AA_SAD_STEREO);
     assert(aa.sad_rewrites == 1);
     memset(&setup, 0, sizeof(setup));
     assert(snd_pcm_plugin_setup(handle, &setup) == 0);
@@ -350,13 +421,28 @@ int main(void)
     params.format.rate = 44100;
     assert(snd_pcm_plugin_params(handle, &params) == 0);
     assert(!aa.expanded && native_setup_state.format.voices == 2);
+    /* ...and GAL's stereo header is put back for the fallback stream. */
+    assert(native_devctl_payload[1] == SQ5_AA_SAD_STEREO);
+    assert(native_devctl_payload[4] == SQ5_AA_SAMPLE_WIDTH);
+    assert(!aa.sad_declared_5_1 && aa.params_bypassed);
     assert(snd_pcm_plugin_write(handle, pcm, sizeof(pcm)) == (ssize_t)sizeof(pcm));
     assert(native_write_calls == 4 && native_write_bytes == sizeof(pcm));
-    assert(native_params_calls == 4);
+    assert(native_params_calls == 5);
     assert(snd_pcm_close(handle) == 0);
     assert(native_flush_calls == 2);
     assert(unlink(level_path) == 0);
     assert(!aa.expanded && aa.handle == NULL);
+
+    /* Fresh GAL session on the six-voice record, header sent before params:
+     * declared 5.1 straight away, since no params has fallen back yet. */
+    assert(snd_pcm_open_name(&handle, "mpl6_gal_ent", SND_PCM_OPEN_PLAYBACK) == 0);
+    assert(snd_pcm_file_descriptor(handle, SND_PCM_CHANNEL_PLAYBACK) == 73);
+    memset(&info, 0, sizeof(info));
+    assert(snd_pcm_channel_info(handle, &info) == 0);
+    assert(aa.six_voice_device && !aa.params_bypassed && !aa.sad_saved);
+    assert(devctl(73, (int)SQ5_AA_SAD_SET_COMMAND, sad, sizeof(sad), NULL) == 0);
+    assert(native_devctl_payload[1] == SQ5_AA_SAD_5_1 && aa.sad_rewrites == 1);
+    assert(snd_pcm_close(handle) == 0);
     puts("android_auto_upmix_interposer_test: PASS");
     return 0;
 }

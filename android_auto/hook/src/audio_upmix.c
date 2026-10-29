@@ -42,12 +42,28 @@
 #define SQ5_AA_SAD_BYTES 24u
 #define SQ5_AA_SAD_STEREO UINT8_C(0xc0)
 #define SQ5_AA_SAD_5_1 UINT8_C(0xfc)
+/* SAD SET payload layout, as MU0918 deva-ctrl-qc decodes it.  Measured in
+ * the QEMU harness by sending 0x40 + offset in every byte and reading
+ * convert_sad_header_to_csd's log: media_type=+0, asad=+1, codec_type=+3,
+ * sample_width=+4, bitrate=+16..19.  GAL's own struct printer agrees
+ * ("media_type, pcm_conf, ca_method, codec_type, source_sample_width,
+ * source_sample_rate, destination_sample_width, bit_rate"): pcm_conf is the
+ * speaker allocation.  The TDM header the amp reads is built from asad and
+ * sample_width. */
+#define SQ5_AA_SAD_ASAD_OFFSET 1u
+#define SQ5_AA_SAD_WIDTH_OFFSET 4u
+#define SQ5_AA_SAD_BITRATE_OFFSET 16u
+/* GAL's stock header is 2ch x 16 bit x 48 kHz.  The mirrored mpl6 session is
+ * mpl1's 6ch/24-bit one, so declare what Luka's createMetadata fix and the
+ * clean RetroArch -> mpl1 path declare: asad 0xfc, sample_width 0x18.  The
+ * bitrate follows the same channels x bits x rate rule as the stock value. */
 #define SQ5_AA_STEREO_BITRATE UINT32_C(0x177000)
-#define SQ5_AA_5_1_BITRATE UINT32_C(0x465000)
+#define SQ5_AA_5_1_BITRATE UINT32_C(0x697800)
 #define SQ5_AA_SAMPLE_WIDTH UINT8_C(0x10)
+#define SQ5_AA_5_1_SAMPLE_WIDTH UINT8_C(0x18)
 /* Luka's validated MHI2Q path keeps the caller's low-water mark but requires
- * at least eight widened periods in the QSA ring.  The patched MU0918 mpl6
- * record permits ten 9216-byte periods. */
+ * at least eight widened periods in the QSA ring.  The mirrored MU0918 mpl6
+ * record permits ten 768-frame periods (9216 S16 bytes each). */
 #define SQ5_AA_REQUIRED_FRAGS 8
 #define HOOK_EXPORT __attribute__((visibility("default")))
 
@@ -81,6 +97,12 @@ static struct {
     unsigned target_channels;
     size_t source_fragment;
     size_t target_fragment;
+    size_t device_sample_bytes;
+    int six_voice_device;
+    int params_bypassed;
+    uint8_t sad_stock[SQ5_AA_SAD_BYTES];
+    int sad_saved;
+    int sad_declared_5_1;
     struct spa_stereo_upmix dsp;
     int dsp_ready;
     struct spa_scene_mask_worker mask_worker;
@@ -261,6 +283,8 @@ HOOK_EXPORT int snd_pcm_open_name(snd_pcm_t **handle, char *name, int mode)
         aa.handle = *handle;
         aa.media_fd = -1;
         aa.expanded = aa.dsp_ready = 0;
+        aa.six_voice_device = aa.params_bypassed = 0;
+        aa.sad_saved = aa.sad_declared_5_1 = 0;
         aa.source_channels = aa.target_channels = 0;
         aa.source_fragment = aa.target_fragment = 0;
         aa.writes = aa.prepares = aa.flushes = 0;
@@ -309,51 +333,148 @@ static void store_le32(uint8_t *p, uint32_t value)
     p[3] = (uint8_t)(value >> 24);
 }
 
+/* Stereo, 16-bit: the two fields the TDM header carries.  The remaining
+ * fields (media/codec type, copy control, rates) pass through unchanged. */
 static int stock_stereo_sad(const uint8_t *sad)
 {
-    return sad[0] == 0 && sad[1] == 1 && sad[2] == 0 &&
-           sad[3] == SQ5_AA_SAD_STEREO && sad[4] == 0 &&
-           load_le32(sad + 8) == SQ5_AA_STEREO_BITRATE &&
-           sad[12] == SQ5_AA_SAMPLE_WIDTH;
+    return sad[SQ5_AA_SAD_ASAD_OFFSET] == SQ5_AA_SAD_STEREO &&
+           sad[SQ5_AA_SAD_WIDTH_OFFSET] == SQ5_AA_SAMPLE_WIDTH;
+}
+
+/* Raw bytes of GAL's first SAD packets, so a car log shows the real layout. */
+static void log_sad_packet(int fd, const uint8_t *sad, int matched)
+{
+    static unsigned shown;
+    char hex[SQ5_AA_SAD_BYTES * 3 + 1];
+    unsigned i;
+    if (shown >= 4) return;
+    shown++;
+    for (i = 0; i < SQ5_AA_SAD_BYTES; i++)
+        snprintf(hex + i * 3, 4, "%02x%s", sad[i], i + 1 < SQ5_AA_SAD_BYTES ? " " : "");
+    probe_log("aa_upmix.sad packet fd=%d stock_stereo=%d bytes=%s", fd, matched, hex);
+}
+
+static devctl_fn real_devctl(void)
+{
+    static devctl_fn real;
+    if (!real) real = (devctl_fn)dlsym(RTLD_NEXT, "devctl");
+    return real;
+}
+
+static void sad_5_1(const uint8_t *stock, uint8_t *declared)
+{
+    memcpy(declared, stock, SQ5_AA_SAD_BYTES);
+    declared[SQ5_AA_SAD_ASAD_OFFSET] = SQ5_AA_SAD_5_1;
+    declared[SQ5_AA_SAD_WIDTH_OFFSET] = SQ5_AA_5_1_SAMPLE_WIDTH;
+    if (load_le32(stock + SQ5_AA_SAD_BITRATE_OFFSET) == SQ5_AA_STEREO_BITRATE)
+        store_le32(declared + SQ5_AA_SAD_BITRATE_OFFSET, SQ5_AA_5_1_BITRATE);
 }
 
 /* The patched QSA path writes L R C LFE Ls Rs, but stock GAL still submits a
- * stereo SAD header (c0). Rewrite only the exact SET packet observed on the
- * exact expanded mpl6_gal_ent descriptor. A private copy preserves GAL's
- * caller buffer, and every mismatch passes through byte-for-byte. */
+ * stereo SAD header (c0). Rewrite only the exact SET packet on the exact
+ * mpl6_gal_ent descriptor.
+ *
+ * GAL's setMetadata order relative to params is unobserved, and deva only
+ * stores the header until playback starts.  So declare 5.1 when the upmix is
+ * expanded, or before params once the record has shown six voices; params
+ * then settles it (sad_reconcile).  If the upmix does not engage, GAL's own
+ * stereo header is re-sent: on a six-voice record QSA's fallback conversion
+ * copies L/R into every slot (QEMU harness: L -> 0,2,4, R -> 1,3,5), which
+ * only a stereo header keeps out of the centre, LFE and surrounds.  A private
+ * copy preserves GAL's caller buffer; every mismatch passes through. */
 HOOK_EXPORT int devctl(int fd, int command, void *data, size_t bytes, int *info)
 {
-    static devctl_fn real;
+    devctl_fn real = real_devctl();
     uint8_t rewritten[SQ5_AA_SAD_BYTES];
-    int eligible;
-    uint64_t rewrite_number;
+    int match, declare;
+    uint64_t rewrite_number = 0;
 
-    if (!real) real = (devctl_fn)dlsym(RTLD_NEXT, "devctl");
     if (!real) return -1;
-    pthread_mutex_lock(&aa.state_lock);
-    eligible = current_mode() == AA_UPMIX_ON && aa.expanded && aa.dsp_ready &&
-               fd >= 0 && fd == aa.media_fd;
-    pthread_mutex_unlock(&aa.state_lock);
-    if (!eligible || (uint32_t)command != SQ5_AA_SAD_SET_COMMAND ||
-        !data || bytes != SQ5_AA_SAD_BYTES ||
-        !stock_stereo_sad((const uint8_t *)data))
+    if ((uint32_t)command != SQ5_AA_SAD_SET_COMMAND || !data || bytes != SQ5_AA_SAD_BYTES)
         return real(fd, command, data, bytes, info);
-
-    memcpy(rewritten, data, sizeof(rewritten));
-    rewritten[3] = SQ5_AA_SAD_5_1;
-    store_le32(rewritten + 8, SQ5_AA_5_1_BITRATE);
+    match = stock_stereo_sad((const uint8_t *)data);
     pthread_mutex_lock(&aa.state_lock);
-    rewrite_number = ++aa.sad_rewrites;
+    if (fd < 0 || fd != aa.media_fd || current_mode() != AA_UPMIX_ON) {
+        pthread_mutex_unlock(&aa.state_lock);
+        return real(fd, command, data, bytes, info);
+    }
+    declare = match && (aa.expanded || (aa.six_voice_device && !aa.params_bypassed));
+    if (match) {
+        memcpy(aa.sad_stock, data, sizeof(aa.sad_stock));
+        aa.sad_saved = 1;
+        aa.sad_declared_5_1 = declare;
+        if (declare) rewrite_number = ++aa.sad_rewrites;
+    }
     pthread_mutex_unlock(&aa.state_lock);
-    probe_log("aa_upmix.sad rewrite=%llu fd=%d asad=c0->fc bitrate=177000->465000 width=10",
-              (unsigned long long)rewrite_number, fd);
+    log_sad_packet(fd, (const uint8_t *)data, match);
+    if (!declare) return real(fd, command, data, bytes, info);
+
+    sad_5_1((const uint8_t *)data, rewritten);
+    probe_log("aa_upmix.sad rewrite=%llu fd=%d asad(+1)=c0->fc width(+4)=10->18 bitrate(+16)=%x->%x",
+              (unsigned long long)rewrite_number, fd,
+              (unsigned)load_le32((const uint8_t *)data + SQ5_AA_SAD_BITRATE_OFFSET),
+              (unsigned)load_le32(rewritten + SQ5_AA_SAD_BITRATE_OFFSET));
     return real(fd, command, rewritten, sizeof(rewritten), info);
 }
 
-static int32_t stereo_bytes(int32_t target_bytes)
+/* After every tracked params call: make the stored header match what the
+ * stream actually is, and remember a fallback so a later SET stays stereo. */
+static void sad_reconcile(snd_pcm_t *handle)
 {
-    return target_bytes > 0 ?
-           (int32_t)sq5_aa_upmix_source_bytes((size_t)target_bytes) : target_bytes;
+    devctl_fn real = real_devctl();
+    uint8_t packet[SQ5_AA_SAD_BYTES];
+    int want, resend, fd, rc;
+
+    pthread_mutex_lock(&aa.state_lock);
+    if (!handle || handle != aa.handle || current_mode() != AA_UPMIX_ON) {
+        pthread_mutex_unlock(&aa.state_lock);
+        return;
+    }
+    want = aa.expanded;
+    aa.params_bypassed = !want;
+    resend = aa.sad_saved && aa.sad_declared_5_1 != want && aa.media_fd >= 0;
+    fd = aa.media_fd;
+    if (resend) {
+        if (want) sad_5_1(aa.sad_stock, packet);
+        else memcpy(packet, aa.sad_stock, sizeof(packet));
+        aa.sad_declared_5_1 = want;
+    }
+    pthread_mutex_unlock(&aa.state_lock);
+    if (!resend || !real) return;
+    rc = real(fd, (int)SQ5_AA_SAD_SET_COMMAND, packet, sizeof(packet), NULL);
+    probe_log("aa_upmix.sad redeclare fd=%d asad=%s result=%d", fd, want ? "fc" : "c0", rc);
+}
+
+/* Hardware bytes -> stereo S16 bytes of the same frames. */
+static int32_t stereo_bytes(int32_t device_bytes, size_t device_sample_bytes)
+{
+    return device_bytes > 0 ?
+           (int32_t)sq5_aa_upmix_source_bytes(
+               sq5_aa_upmix_client_bytes((size_t)device_bytes, device_sample_bytes)) :
+           device_bytes;
+}
+
+/* The device's own record.  snd_pcm_plugin_info returns the same byte sizes
+ * but widens formats to everything its converters accept, so only this call
+ * says whether a fragment counts S16 or S32 samples.  Caller owns real I/O. */
+static int physical_info(snd_pcm_t *handle, snd_pcm_channel_info_t *info)
+{
+    static info_fn real;
+    if (!real) real = (info_fn)dlsym(RTLD_NEXT, "snd_pcm_channel_info");
+    memset(info, 0, sizeof(*info));
+    info->channel = SND_PCM_CHANNEL_PLAYBACK;
+    return real ? real(handle, info) : -EIO;
+}
+
+/* Six voices at minimum means route attach builds a six-channel CSD session
+ * (deva copies min_voices), which is what the 5.1 SAD header declares. */
+static void note_six_voice_device(snd_pcm_t *handle, const snd_pcm_channel_info_t *device)
+{
+    int six_voice = device && device->min_voices >= SQ5_AA_UPMIX_TARGET_CHANNELS &&
+                    device->max_voices >= SQ5_AA_UPMIX_TARGET_CHANNELS;
+    pthread_mutex_lock(&aa.state_lock);
+    if (handle && handle == aa.handle) aa.six_voice_device = six_voice;
+    pthread_mutex_unlock(&aa.state_lock);
 }
 
 /* GAL sizes its media period from the channel info.  On the patched PCM6
@@ -361,12 +482,14 @@ static int32_t stereo_bytes(int32_t target_bytes)
  * stereo periods, was given 3072 and closed the sink before its first write
  * (car run 310: prepare ok, writes=0, every ~3 s).  Show GAL the stereo
  * device the upmix serves instead: two voices and every byte size scaled
- * from PCM6 to its stereo source, i.e. the stock 3072-byte period.  The
- * params interposer and libasound itself still read the physical record. */
+ * from the PCM6 frames to its S16 stereo source, i.e. the stock 3072-byte
+ * period on both the S16 and the S32 (mpl1 mirror) record.  The params
+ * interposer and libasound itself still read the physical record. */
 static int stereo_info(snd_pcm_t *handle, snd_pcm_channel_info_t *info,
                        info_fn real, const char *api)
 {
-    snd_pcm_channel_info_t physical;
+    snd_pcm_channel_info_t physical, device;
+    size_t sample_bytes;
     int tracked, result;
     uint64_t call_number;
 
@@ -380,27 +503,31 @@ static int stereo_info(snd_pcm_t *handle, snd_pcm_channel_info_t *info,
     /* snd_pcm_plugin_info may call snd_pcm_channel_info; translate once. */
     set_real_io(1);
     result = real(handle, info);
+    sample_bytes = !result && !physical_info(handle, &device) ?
+                   sq5_aa_upmix_device_sample_bytes(device.formats) : 0;
     set_real_io(0);
-    if (result || info->max_voices < SQ5_AA_UPMIX_TARGET_CHANNELS ||
+    note_six_voice_device(handle, sample_bytes ? &device : NULL);
+    if (result || !sample_bytes || info->max_voices < SQ5_AA_UPMIX_TARGET_CHANNELS ||
         info->max_fragment_size <
-            SQ5_AA_UPMIX_TARGET_CHANNELS * SQ5_AA_UPMIX_SAMPLE_BYTES)
+            (int32_t)(SQ5_AA_UPMIX_TARGET_CHANNELS * sample_bytes))
         return result;
     physical = *info;
     info->min_voices = info->max_voices = SQ5_AA_UPMIX_SOURCE_CHANNELS;
-    info->min_fragment_size = stereo_bytes(physical.min_fragment_size);
-    info->max_fragment_size = stereo_bytes(physical.max_fragment_size);
-    info->max_buffer_size = stereo_bytes(physical.max_buffer_size);
-    info->fifo_size = stereo_bytes(physical.fifo_size);
-    info->transfer_block_size = stereo_bytes(physical.transfer_block_size);
+    info->min_fragment_size = stereo_bytes(physical.min_fragment_size, sample_bytes);
+    info->max_fragment_size = stereo_bytes(physical.max_fragment_size, sample_bytes);
+    info->max_buffer_size = stereo_bytes(physical.max_buffer_size, sample_bytes);
+    info->fifo_size = stereo_bytes(physical.fifo_size, sample_bytes);
+    info->transfer_block_size = stereo_bytes(physical.transfer_block_size, sample_bytes);
     pthread_mutex_lock(&aa.state_lock);
     call_number = ++aa.infos;
     pthread_mutex_unlock(&aa.state_lock);
     if (call_number <= 4)
-        probe_log("aa_upmix.info api=%s n=%llu physical=%d..%dv/%d..%d/buf%d shown=%d..%dv/%d..%d/buf%d align=%d",
+        probe_log("aa_upmix.info api=%s n=%llu physical=%d..%dv/%d..%d/buf%d/s%u shown=%d..%dv/%d..%d/buf%d align=%d",
                   api, (unsigned long long)call_number,
                   physical.min_voices, physical.max_voices,
                   physical.min_fragment_size, physical.max_fragment_size,
-                  physical.max_buffer_size, info->min_voices, info->max_voices,
+                  physical.max_buffer_size, (unsigned)sample_bytes,
+                  info->min_voices, info->max_voices,
                   info->min_fragment_size, info->max_fragment_size,
                   info->max_buffer_size, physical.fragment_align);
     return 0;
@@ -420,17 +547,16 @@ HOOK_EXPORT int snd_pcm_plugin_info(snd_pcm_t *handle, snd_pcm_channel_info_t *i
     return stereo_info(handle, info, real, "plugin");
 }
 
-HOOK_EXPORT int snd_pcm_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_t *params)
+static int tracked_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_t *params)
 {
     static params_fn real;
     static setup_fn real_setup;
-    static info_fn real_info;
     snd_pcm_channel_params_t adjusted;
     snd_pcm_channel_setup_t actual;
     snd_pcm_channel_info_t info;
     struct sq5_aa_pcm_geometry source, target;
     struct sq5_aa_pcm_caps caps;
-    size_t requested_source_fragment;
+    size_t requested_source_fragment, sample_bytes;
     int tracked, result, compatible, dsp_ok;
 
     if (!real) real = (params_fn)dlsym(RTLD_NEXT, "snd_pcm_plugin_params");
@@ -453,14 +579,15 @@ HOOK_EXPORT int snd_pcm_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_
     aa.expanded = 0;
     aa.source_channels = aa.target_channels = 0;
     aa.source_fragment = aa.target_fragment = 0;
+    aa.device_sample_bytes = 0;
     pthread_mutex_unlock(&aa.state_lock);
-    memset(&info, 0, sizeof(info));
-    info.channel = SND_PCM_CHANNEL_PLAYBACK;
-    if (!real_info) real_info = (info_fn)dlsym(RTLD_NEXT, "snd_pcm_channel_info");
-    result = real_info ? real_info(handle, &info) : -1;
-    probe_log("aa_upmix.caps result=%d voices=%d..%d rate=%d..%d frag=%d..%d formats=0x%x",
+    result = physical_info(handle, &info);
+    sample_bytes = result ? 0 : sq5_aa_upmix_device_sample_bytes(info.formats);
+    note_six_voice_device(handle, sample_bytes ? &info : NULL);
+    probe_log("aa_upmix.caps result=%d voices=%d..%d rate=%d..%d frag=%d..%d formats=0x%x sample=%u",
               result, info.min_voices, info.max_voices, info.min_rate, info.max_rate,
-              info.min_fragment_size, info.max_fragment_size, (unsigned)info.formats);
+              info.min_fragment_size, info.max_fragment_size, (unsigned)info.formats,
+              (unsigned)sample_bytes);
     if (current_mode() == AA_UPMIX_PROBE || result != 0) {
         result = real(handle, params);
         set_real_io(0);
@@ -481,8 +608,9 @@ HOOK_EXPORT int snd_pcm_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_
     source.fragment_bytes = compatible && params->buf.block.frag_size > 0 ?
                             (size_t)params->buf.block.frag_size : 0;
     caps.max_channels = info.max_voices > 0 ? (unsigned)info.max_voices : 0;
+    /* In the S16 bytes the plugin layer accepts: 0x4800 S32 -> 9216. */
     caps.max_fragment_bytes = info.max_fragment_size > 0 ?
-                              (size_t)info.max_fragment_size : 0;
+        sq5_aa_upmix_client_bytes((size_t)info.max_fragment_size, sample_bytes) : 0;
     requested_source_fragment = source.fragment_bytes;
     if (compatible)
         source.fragment_bytes =
@@ -548,6 +676,7 @@ HOOK_EXPORT int snd_pcm_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_
         aa.target_channels = target.channels;
         aa.source_fragment = source.fragment_bytes;
         aa.target_fragment = target.fragment_bytes;
+        aa.device_sample_bytes = sample_bytes;
     }
     pthread_mutex_unlock(&aa.state_lock);
     if (!dsp_ok) {
@@ -563,6 +692,13 @@ HOOK_EXPORT int snd_pcm_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_
     set_real_io(0);
     pthread_mutex_unlock(&aa.io_lock);
     return 0;
+}
+
+HOOK_EXPORT int snd_pcm_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_t *params)
+{
+    int result = tracked_plugin_params(handle, params);
+    sad_reconcile(handle);
+    return result;
 }
 
 HOOK_EXPORT int snd_pcm_plugin_setup(snd_pcm_t *handle, snd_pcm_channel_setup_t *setup)
@@ -666,18 +802,22 @@ HOOK_EXPORT int snd_pcm_plugin_flush(snd_pcm_t *handle, int channel)
 }
 
 /* Keep GAL's queue accounting in the same stereo bytes as its setup.  No
- * io_lock: a status poll must not wait behind a write blocked in QSA. */
+ * io_lock: a status poll must not wait behind a write blocked in QSA.
+ * snd_pcm_plugin_status already reports the S16 bytes GAL's plugin writes;
+ * snd_pcm_channel_status reports the hardware's (S32 on the mpl1 mirror). */
 static int stereo_status(snd_pcm_t *handle, snd_pcm_channel_status_t *status,
-                         status_fn real, const char *api)
+                         status_fn real, const char *api, int hardware_bytes)
 {
     int expanded, result;
     int32_t count, free_bytes;
+    size_t sample_bytes;
     uint64_t call_number;
 
     if (!real) return -EIO;
     if (inside_real_io()) return real(handle, status);
     pthread_mutex_lock(&aa.state_lock);
     expanded = handle && handle == aa.handle && aa.expanded;
+    sample_bytes = hardware_bytes ? aa.device_sample_bytes : SQ5_AA_UPMIX_SAMPLE_BYTES;
     pthread_mutex_unlock(&aa.state_lock);
     if (!expanded || !status) return real(handle, status);
 
@@ -687,9 +827,10 @@ static int stereo_status(snd_pcm_t *handle, snd_pcm_channel_status_t *status,
     if (result) return result;
     count = status->count;
     free_bytes = status->free;
-    status->count = stereo_bytes(count);
-    status->free = stereo_bytes(free_bytes);
-    status->scount = (uint32_t)sq5_aa_upmix_source_bytes(status->scount);
+    status->count = stereo_bytes(count, sample_bytes);
+    status->free = stereo_bytes(free_bytes, sample_bytes);
+    status->scount = (uint32_t)sq5_aa_upmix_source_bytes(
+        sq5_aa_upmix_client_bytes(status->scount, sample_bytes));
     status->subbuffered = (uint32_t)sq5_aa_upmix_source_bytes(status->subbuffered);
     pthread_mutex_lock(&aa.state_lock);
     call_number = ++aa.statuses;
@@ -705,14 +846,14 @@ HOOK_EXPORT int snd_pcm_channel_status(snd_pcm_t *handle, snd_pcm_channel_status
 {
     static status_fn real;
     if (!real) real = (status_fn)dlsym(RTLD_NEXT, "snd_pcm_channel_status");
-    return stereo_status(handle, status, real, "channel");
+    return stereo_status(handle, status, real, "channel", 1);
 }
 
 HOOK_EXPORT int snd_pcm_plugin_status(snd_pcm_t *handle, snd_pcm_channel_status_t *status)
 {
     static status_fn real;
     if (!real) real = (status_fn)dlsym(RTLD_NEXT, "snd_pcm_plugin_status");
-    return stereo_status(handle, status, real, "plugin");
+    return stereo_status(handle, status, real, "plugin", 0);
 }
 
 static ssize_t upmix_write(snd_pcm_t *handle, const void *buffer, size_t size,
@@ -832,6 +973,8 @@ HOOK_EXPORT int snd_pcm_close(snd_pcm_t *handle)
     aa.handle = NULL;
     aa.media_fd = -1;
     aa.expanded = 0;
+    aa.six_voice_device = aa.params_bypassed = 0;
+    aa.sad_saved = aa.sad_declared_5_1 = 0;
     aa.source_channels = aa.target_channels = 0;
     aa.source_fragment = aa.target_fragment = 0;
     pthread_mutex_unlock(&aa.state_lock);

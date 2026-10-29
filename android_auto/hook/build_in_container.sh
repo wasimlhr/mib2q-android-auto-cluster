@@ -10,7 +10,7 @@ cp "$SRC"/vendor/*.[ch] "$SRC"/src/*.[ch] "$B/"
 cd "$B"
 # The verified receiver hook is snapshotted, not edited in the probe project.
 sed -e 's@/tmp/sq5_cluster_probe/probe-%ld.log@/tmp/sq5_cluster_live-hook-%ld.log@g' \
-    -e 's/sq5-cluster-probe-v1/sq5-cluster-live-aa-sad-v1/g' \
+    -e 's/sq5-cluster-probe-v1/sq5-cluster-live-aa-mirror-v1/g' \
     -e 's/capture_only=1/capture_only=0/g' probe.c > live_hook.c
 # Wide band (owner 2026-09-29): 1280x720 (codec_resolution 2) with height_margin 315, so the phone draws
 # its UI in a centred 1280x405 band = the cockpit's 1440x455 shape (player.c crops it, x1.125).
