@@ -38,6 +38,13 @@
  * the car, without adding Luka's full 1 MiB bridge buffer to every GAL
  * process. */
 #define SQ5_AA_UPMIX_MAX_OUTPUT_BYTES (256u * 1024u)
+#define SQ5_AA_SAD_SET_COMMAND UINT32_C(0x8018fa01)
+#define SQ5_AA_SAD_BYTES 24u
+#define SQ5_AA_SAD_STEREO UINT8_C(0xc0)
+#define SQ5_AA_SAD_5_1 UINT8_C(0xfc)
+#define SQ5_AA_STEREO_BITRATE UINT32_C(0x177000)
+#define SQ5_AA_5_1_BITRATE UINT32_C(0x465000)
+#define SQ5_AA_SAMPLE_WIDTH UINT8_C(0x10)
 /* Luka's validated MHI2Q path keeps the caller's low-water mark but requires
  * at least eight widened periods in the QSA ring.  The patched MU0918 mpl6
  * record permits ten 9216-byte periods. */
@@ -51,6 +58,8 @@ typedef int (*params_fn)(snd_pcm_t *, snd_pcm_channel_params_t *);
 typedef int (*setup_fn)(snd_pcm_t *, snd_pcm_channel_setup_t *);
 typedef int (*info_fn)(snd_pcm_t *, snd_pcm_channel_info_t *);
 typedef int (*status_fn)(snd_pcm_t *, snd_pcm_channel_status_t *);
+typedef int (*descriptor_fn)(snd_pcm_t *, int);
+typedef int (*devctl_fn)(int, int, void *, size_t, int *);
 typedef int (*prepare_fn)(snd_pcm_t *, int);
 typedef int (*flush_fn)(snd_pcm_t *, int);
 typedef ssize_t (*write_fn)(snd_pcm_t *, const void *, size_t);
@@ -66,6 +75,7 @@ static struct {
     pthread_once_t mode_once;
     enum aa_upmix_mode mode;
     snd_pcm_t *handle;
+    int media_fd;
     int expanded;
     unsigned source_channels;
     unsigned target_channels;
@@ -81,6 +91,7 @@ static struct {
     uint64_t flushes;
     uint64_t infos;
     uint64_t statuses;
+    uint64_t sad_rewrites;
     uint64_t failures;
     uint64_t short_writes;
     int active_level;
@@ -88,7 +99,8 @@ static struct {
     .state_lock = PTHREAD_MUTEX_INITIALIZER,
     .io_lock = PTHREAD_MUTEX_INITIALIZER,
     .io_key_once = PTHREAD_ONCE_INIT,
-    .mode_once = PTHREAD_ONCE_INIT
+    .mode_once = PTHREAD_ONCE_INIT,
+    .media_fd = -1
 };
 
 static struct scene_mask_weights mask_blob;
@@ -247,17 +259,95 @@ HOOK_EXPORT int snd_pcm_open_name(snd_pcm_t **handle, char *name, int mode)
         pthread_mutex_lock(&aa.io_lock);
         pthread_mutex_lock(&aa.state_lock);
         aa.handle = *handle;
+        aa.media_fd = -1;
         aa.expanded = aa.dsp_ready = 0;
         aa.source_channels = aa.target_channels = 0;
         aa.source_fragment = aa.target_fragment = 0;
         aa.writes = aa.prepares = aa.flushes = 0;
         aa.infos = aa.statuses = 0;
+        aa.sad_rewrites = 0;
         aa.failures = aa.short_writes = 0;
         pthread_mutex_unlock(&aa.state_lock);
         pthread_mutex_unlock(&aa.io_lock);
         probe_log("aa_upmix.open handle=%p mode=0x%x", *handle, mode);
     }
     return result;
+}
+
+/* GAL owns the SAD devctl and addresses it by the PCM file descriptor rather
+ * than by snd_pcm_t. Capture only the descriptor for our exact media handle;
+ * every other QSA endpoint remains outside the rewrite boundary. */
+HOOK_EXPORT int snd_pcm_file_descriptor(snd_pcm_t *handle, int channel)
+{
+    static descriptor_fn real;
+    int fd, tracked;
+    if (!real) real = (descriptor_fn)dlsym(RTLD_NEXT, "snd_pcm_file_descriptor");
+    if (!real) return -1;
+    fd = real(handle, channel);
+    pthread_mutex_lock(&aa.state_lock);
+    tracked = handle && handle == aa.handle &&
+              channel == SND_PCM_CHANNEL_PLAYBACK;
+    if (tracked && fd >= 0 && current_mode() != AA_UPMIX_OFF)
+        aa.media_fd = fd;
+    pthread_mutex_unlock(&aa.state_lock);
+    if (tracked && fd >= 0)
+        probe_log("aa_upmix.fd value=%d", fd);
+    return fd;
+}
+
+static uint32_t load_le32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static void store_le32(uint8_t *p, uint32_t value)
+{
+    p[0] = (uint8_t)value;
+    p[1] = (uint8_t)(value >> 8);
+    p[2] = (uint8_t)(value >> 16);
+    p[3] = (uint8_t)(value >> 24);
+}
+
+static int stock_stereo_sad(const uint8_t *sad)
+{
+    return sad[0] == 0 && sad[1] == 1 && sad[2] == 0 &&
+           sad[3] == SQ5_AA_SAD_STEREO && sad[4] == 0 &&
+           load_le32(sad + 8) == SQ5_AA_STEREO_BITRATE &&
+           sad[12] == SQ5_AA_SAMPLE_WIDTH;
+}
+
+/* The patched QSA path writes L R C LFE Ls Rs, but stock GAL still submits a
+ * stereo SAD header (c0). Rewrite only the exact SET packet observed on the
+ * exact expanded mpl6_gal_ent descriptor. A private copy preserves GAL's
+ * caller buffer, and every mismatch passes through byte-for-byte. */
+HOOK_EXPORT int devctl(int fd, int command, void *data, size_t bytes, int *info)
+{
+    static devctl_fn real;
+    uint8_t rewritten[SQ5_AA_SAD_BYTES];
+    int eligible;
+    uint64_t rewrite_number;
+
+    if (!real) real = (devctl_fn)dlsym(RTLD_NEXT, "devctl");
+    if (!real) return -1;
+    pthread_mutex_lock(&aa.state_lock);
+    eligible = current_mode() == AA_UPMIX_ON && aa.expanded && aa.dsp_ready &&
+               fd >= 0 && fd == aa.media_fd;
+    pthread_mutex_unlock(&aa.state_lock);
+    if (!eligible || (uint32_t)command != SQ5_AA_SAD_SET_COMMAND ||
+        !data || bytes != SQ5_AA_SAD_BYTES ||
+        !stock_stereo_sad((const uint8_t *)data))
+        return real(fd, command, data, bytes, info);
+
+    memcpy(rewritten, data, sizeof(rewritten));
+    rewritten[3] = SQ5_AA_SAD_5_1;
+    store_le32(rewritten + 8, SQ5_AA_5_1_BITRATE);
+    pthread_mutex_lock(&aa.state_lock);
+    rewrite_number = ++aa.sad_rewrites;
+    pthread_mutex_unlock(&aa.state_lock);
+    probe_log("aa_upmix.sad rewrite=%llu fd=%d asad=c0->fc bitrate=177000->465000 width=10",
+              (unsigned long long)rewrite_number, fd);
+    return real(fd, command, rewritten, sizeof(rewritten), info);
 }
 
 static int32_t stereo_bytes(int32_t target_bytes)
@@ -721,7 +811,8 @@ HOOK_EXPORT int snd_pcm_close(snd_pcm_t *handle)
 {
     static close_fn real;
     int tracked, result;
-    uint64_t writes, prepares, flushes, infos, statuses, failures, short_writes;
+    uint64_t writes, prepares, flushes, infos, statuses, sad_rewrites;
+    uint64_t failures, short_writes;
     if (!real) real = (close_fn)dlsym(RTLD_NEXT, "snd_pcm_close");
     if (!real) return -1;
     pthread_mutex_lock(&aa.state_lock);
@@ -735,16 +826,19 @@ HOOK_EXPORT int snd_pcm_close(snd_pcm_t *handle)
     pthread_mutex_lock(&aa.state_lock);
     writes = aa.writes; prepares = aa.prepares; flushes = aa.flushes;
     infos = aa.infos; statuses = aa.statuses;
+    sad_rewrites = aa.sad_rewrites;
     failures = aa.failures; short_writes = aa.short_writes;
     stop_dsp_locked();
     aa.handle = NULL;
+    aa.media_fd = -1;
     aa.expanded = 0;
     aa.source_channels = aa.target_channels = 0;
     aa.source_fragment = aa.target_fragment = 0;
     pthread_mutex_unlock(&aa.state_lock);
     pthread_mutex_unlock(&aa.io_lock);
-    probe_log("aa_upmix.close result=%d infos=%llu statuses=%llu prepares=%llu flushes=%llu writes=%llu dsp_fail=%llu short=%llu", result,
+    probe_log("aa_upmix.close result=%d infos=%llu statuses=%llu sad=%llu prepares=%llu flushes=%llu writes=%llu dsp_fail=%llu short=%llu", result,
               (unsigned long long)infos, (unsigned long long)statuses,
+              (unsigned long long)sad_rewrites,
               (unsigned long long)prepares, (unsigned long long)flushes,
               (unsigned long long)writes, (unsigned long long)failures,
               (unsigned long long)short_writes);

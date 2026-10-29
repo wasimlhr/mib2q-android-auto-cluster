@@ -39,7 +39,8 @@ docker run --rm --platform=linux/amd64 \
         for symbol in snd_pcm_open_name snd_pcm_channel_info snd_pcm_plugin_info \
             snd_pcm_plugin_params snd_pcm_plugin_setup snd_pcm_plugin_prepare \
             snd_pcm_plugin_flush snd_pcm_channel_status snd_pcm_plugin_status \
-            snd_pcm_plugin_write snd_pcm_write snd_pcm_close; do
+            snd_pcm_file_descriptor devctl snd_pcm_plugin_write snd_pcm_write \
+            snd_pcm_close; do
             arm-unknown-nto-qnx6.5.0eabi-readelf -Ws libsq5_cluster_live.so |
                 grep -Eq "[[:space:]]${symbol}$" || {
                     echo "ERROR: missing exported QSA interposer: $symbol" >&2

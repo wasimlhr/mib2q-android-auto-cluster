@@ -23,6 +23,11 @@ static unsigned native_write_calls;
 static size_t native_write_bytes;
 static unsigned native_prepare_calls;
 static unsigned native_flush_calls;
+static unsigned native_devctl_calls;
+static int native_devctl_fd;
+static uint32_t native_devctl_command;
+static size_t native_devctl_bytes;
+static uint8_t native_devctl_payload[SQ5_AA_SAD_BYTES];
 static int nested_setup_voices;
 
 void probe_log(const char *format, ...)
@@ -66,6 +71,26 @@ static int native_status(snd_pcm_t *handle, snd_pcm_channel_status_t *status)
     status->count = 9216;
     status->free = 18432;
     status->scount = 92160;
+    return 0;
+}
+
+static int native_fd(snd_pcm_t *handle, int channel)
+{
+    assert(handle == &media);
+    assert(channel == SND_PCM_CHANNEL_PLAYBACK);
+    return 73;
+}
+
+static int native_devctl(int fd, int command, void *data, size_t bytes, int *info)
+{
+    ++native_devctl_calls;
+    native_devctl_fd = fd;
+    native_devctl_command = (uint32_t)command;
+    native_devctl_bytes = bytes;
+    memset(native_devctl_payload, 0, sizeof(native_devctl_payload));
+    if (data && bytes <= sizeof(native_devctl_payload))
+        memcpy(native_devctl_payload, data, bytes);
+    if (info) *info = 19;
     return 0;
 }
 
@@ -144,6 +169,8 @@ static void *test_dlsym(void *scope, const char *name)
     SYMBOL("snd_pcm_plugin_info", native_plugin_info);
     SYMBOL("snd_pcm_channel_status", native_status);
     SYMBOL("snd_pcm_plugin_status", native_status);
+    SYMBOL("snd_pcm_file_descriptor", native_fd);
+    SYMBOL("devctl", native_devctl);
     SYMBOL("snd_pcm_plugin_params", native_params);
     SYMBOL("snd_pcm_plugin_setup", native_setup);
     SYMBOL("snd_pcm_plugin_prepare", native_prepare);
@@ -180,6 +207,8 @@ int main(void)
     snd_pcm_channel_setup_t setup;
     snd_pcm_channel_info_t info;
     snd_pcm_channel_status_t status;
+    uint8_t sad[SQ5_AA_SAD_BYTES] = { 0 };
+    uint8_t wrong_sad[SQ5_AA_SAD_BYTES] = { 0 };
     int16_t pcm[768 * 2] = { 0 };
     int16_t gal_packet[2048 * 2] = { 0 };
     FILE *level_file;
@@ -193,6 +222,18 @@ int main(void)
     assert(fclose(level_file) == 0);
     assert(snd_pcm_open_name(&handle, "mpl6_gal_ent", SND_PCM_OPEN_PLAYBACK) == 0);
     assert(handle == &media);
+    assert(snd_pcm_file_descriptor(handle, SND_PCM_CHANNEL_PLAYBACK) == 73);
+    assert(aa.media_fd == 73);
+    sad[1] = 1;
+    sad[3] = SQ5_AA_SAD_STEREO;
+    sad[12] = SQ5_AA_SAMPLE_WIDTH;
+    store_le32(sad + 8, SQ5_AA_STEREO_BITRATE);
+
+    /* The header must remain stereo until the physical six-channel setup has
+     * succeeded. This prevents a failed upmix negotiation from lying to CSD. */
+    assert(devctl(73, (int)SQ5_AA_SAD_SET_COMMAND, sad, sizeof(sad), NULL) == 0);
+    assert(native_devctl_calls == 1 && native_devctl_payload[3] == SQ5_AA_SAD_STEREO);
+    assert(aa.sad_rewrites == 0);
 
     /* Stock MU0918 caps: GAL's info and its exact stereo request pass through. */
     memset(&info, 0, sizeof(info));
@@ -227,6 +268,32 @@ int main(void)
     assert(aa.expanded && aa.source_fragment == 3072 && aa.target_fragment == 9216);
     assert(native_setup_state.format.voices == 6);
     assert(native_setup_state.buf.block.frag_size == 9216);
+
+    /* Exact stock GAL metadata becomes a truthful six-slot declaration. The
+     * caller's buffer is immutable from GAL's point of view. */
+    assert(devctl(73, (int)SQ5_AA_SAD_SET_COMMAND, sad, sizeof(sad), NULL) == 0);
+    assert(native_devctl_calls == 2 && native_devctl_fd == 73);
+    assert(native_devctl_command == SQ5_AA_SAD_SET_COMMAND);
+    assert(native_devctl_bytes == SQ5_AA_SAD_BYTES);
+    assert(native_devctl_payload[3] == SQ5_AA_SAD_5_1);
+    assert(load_le32(native_devctl_payload + 8) == SQ5_AA_5_1_BITRATE);
+    assert(native_devctl_payload[12] == SQ5_AA_SAMPLE_WIDTH);
+    assert(sad[3] == SQ5_AA_SAD_STEREO);
+    assert(load_le32(sad + 8) == SQ5_AA_STEREO_BITRATE);
+    assert(aa.sad_rewrites == 1);
+
+    /* Wrong descriptor, command, or payload is never rewritten. */
+    assert(devctl(74, (int)SQ5_AA_SAD_SET_COMMAND, sad, sizeof(sad), NULL) == 0);
+    assert(native_devctl_payload[3] == SQ5_AA_SAD_STEREO);
+    memcpy(wrong_sad, sad, sizeof(wrong_sad));
+    wrong_sad[1] = 2;
+    assert(devctl(73, (int)SQ5_AA_SAD_SET_COMMAND,
+                  wrong_sad, sizeof(wrong_sad), NULL) == 0);
+    assert(native_devctl_payload[3] == SQ5_AA_SAD_STEREO);
+    assert(devctl(73, (int)(SQ5_AA_SAD_SET_COMMAND - 1u),
+                  sad, sizeof(sad), NULL) == 0);
+    assert(native_devctl_payload[3] == SQ5_AA_SAD_STEREO);
+    assert(aa.sad_rewrites == 1);
     memset(&setup, 0, sizeof(setup));
     assert(snd_pcm_plugin_setup(handle, &setup) == 0);
     assert(setup.format.voices == 2 && setup.buf.block.frag_size == 3072);

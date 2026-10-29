@@ -37,6 +37,19 @@ def main() -> int:
     changed = {i for i, (before, after) in enumerate(zip(stock, result)) if before != after}
     assert changed == patcher.EXPECTED_CHANGED_OFFSETS
 
+    # Luka's step-1 DMA helper is required only while the capability minima
+    # remain stereo. This profile fixes the attach-time and DMA geometry at
+    # the source: 0x2400 bytes / (6 voices * 2 bytes) = 768 frames per 16 ms,
+    # exactly 48 kHz, with a ten-period ring. A 0x0c00 fragment here would be
+    # 256 frames per tick and reproduce the one-third-speed failure.
+    record = struct.unpack_from("<12I", result, patcher.MPL6_RECORD_OFFSET)
+    voices, fragment, buffer_bytes = record[5], record[7], record[9]
+    frames_per_tick = fragment // (voices * 2)
+    assert voices == 6
+    assert fragment == 0x2400
+    assert frames_per_tick * 1000 // 16 == 48000
+    assert buffer_bytes == fragment * 10
+
     bad = bytearray(stock)
     bad[patcher.MPL6_RECORD_OFFSET] ^= 1
     try:
