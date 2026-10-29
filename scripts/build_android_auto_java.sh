@@ -20,12 +20,17 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 [ -n "$STOCK" ] && [ -f "$STOCK" ] || usage
-[ -n "$COMPILE" ] || COMPILE=$STOCK
-[ -f "$COMPILE" ] || usage
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 STOCK=$(cd "$(dirname "$STOCK")" && pwd)/$(basename "$STOCK")
-COMPILE=$(cd "$(dirname "$COMPILE")" && pwd)/$(basename "$COMPILE")
+if [ -n "$COMPILE" ]; then
+    [ -f "$COMPILE" ] || usage
+    COMPILE=$(cd "$(dirname "$COMPILE")" && pwd)/$(basename "$COMPILE")
+else
+    COMPILE=$(mktemp "${TMPDIR:-/tmp}/mib2q-lsd-innerclasses.XXXXXX")
+    trap 'rm -f "$COMPILE"' EXIT HUP INT TERM
+    python3 "$ROOT/scripts/restore_innerclasses.py" "$STOCK" "$COMPILE"
+fi
 
 CHECK_ARGS=(--stock-jar "$STOCK" --compile-jar "$COMPILE")
 if [ -n "$PROFILE" ]; then
@@ -40,10 +45,17 @@ RESULT=$(printf '%s' "$REPORT" | python3 -c 'import json,sys; print(json.load(sy
 [ "$RESULT" = validated-profile ] || [ "$RESULT" = java-build-compatible ] || [ "$RESULT" = java-port-ready ] || {
     printf '%s\n' "$REPORT"; echo "ERROR: firmware Java inputs are not compatible" >&2; exit 1;
 }
+PROFILE_JSON="$ROOT/firmware/profiles/$PROFILE.json"
+JAVA_PROFILE=$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1], encoding="utf-8")); print(p.get("java_source_profile", p["id"]))' "$PROFILE_JSON")
+case "$JAVA_PROFILE" in [!A-Za-z0-9]*|*[!A-Za-z0-9_.-]*) echo "ERROR: invalid Java source profile id" >&2; exit 1;; esac
+[ -d "$ROOT/android_auto/java/firmware/$JAVA_PROFILE/src" ] || [ "$JAVA_PROFILE" = mhi2q_us_aug22_p3639_mu0918 ] || {
+    echo "ERROR: missing Java source profile $JAVA_PROFILE" >&2; exit 1;
+}
 echo "Firmware profile: $PROFILE ($RESULT)"
+echo "Java source profile: $JAVA_PROFILE"
 
 MOUNTS=(-v "$ROOT":/src -v "$STOCK":/firmware/stock.jar:ro -v "$COMPILE":/firmware/compile.jar:ro)
-ENV=(-e STOCK_JAR=/firmware/stock.jar -e COMPILE_JAR=/firmware/compile.jar -e FIRMWARE_PROFILE_ID="$PROFILE")
+ENV=(-e STOCK_JAR=/firmware/stock.jar -e COMPILE_JAR=/firmware/compile.jar -e FIRMWARE_PROFILE_ID="$PROFILE" -e FIRMWARE_JAVA_PROFILE_ID="$JAVA_PROFILE")
 if [ -n "$SOURCE" ]; then
     SOURCE=$(cd "$SOURCE" && pwd)
     MOUNTS+=(-v "$SOURCE":/firmware/source:ro)

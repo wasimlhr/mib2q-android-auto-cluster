@@ -25,8 +25,13 @@
 #define SQ5_AA_MEDIA_DEVICE "mpl6_gal_ent"
 #define SQ5_AA_MASK_ENV "SQ5_AA_UPMIX_MASK"
 #define SQ5_AA_LEVEL_ENV "SQ5_AA_UPMIX_LEVEL"
-#define SQ5_AA_MIN_FRAGS 4
-#define SQ5_AA_MAX_FRAGS 6
+#define SQ5_AA_LEVEL_FILE_ENV "SQ5_AA_UPMIX_LEVEL_FILE"
+#define SQ5_AA_LEVEL_FILE "/tmp/carplay_upmix_level"
+#define SQ5_AA_LEVEL_POLL_WRITES 64u
+/* Luka's validated MHI2Q path keeps the caller's low-water mark but requires
+ * at least eight widened periods in the QSA ring.  The patched MU0918 mpl6
+ * record permits ten 9216-byte periods. */
+#define SQ5_AA_REQUIRED_FRAGS 8
 #define HOOK_EXPORT __attribute__((visibility("default")))
 
 void probe_log(const char *fmt, ...);
@@ -35,6 +40,8 @@ typedef int (*open_fn)(snd_pcm_t **, char *, int);
 typedef int (*params_fn)(snd_pcm_t *, snd_pcm_channel_params_t *);
 typedef int (*setup_fn)(snd_pcm_t *, snd_pcm_channel_setup_t *);
 typedef int (*info_fn)(snd_pcm_t *, snd_pcm_channel_info_t *);
+typedef int (*prepare_fn)(snd_pcm_t *, int);
+typedef int (*flush_fn)(snd_pcm_t *, int);
 typedef ssize_t (*write_fn)(snd_pcm_t *, const void *, size_t);
 typedef int (*close_fn)(snd_pcm_t *);
 
@@ -59,8 +66,11 @@ static struct {
     int mask_worker_started;
     int16_t output[SQ5_AA_UPMIX_MAX_FRAMES * SQ5_AA_UPMIX_TARGET_CHANNELS];
     uint64_t writes;
+    uint64_t prepares;
+    uint64_t flushes;
     uint64_t failures;
     uint64_t short_writes;
+    int active_level;
 } aa = {
     .state_lock = PTHREAD_MUTEX_INITIALIZER,
     .io_lock = PTHREAD_MUTEX_INITIALIZER,
@@ -89,8 +99,8 @@ static void read_mode(void)
     aa.mode = value && !strcmp(value, "on") ? AA_UPMIX_ON :
               value && !strcmp(value, "probe") ? AA_UPMIX_PROBE : AA_UPMIX_OFF;
     if (aa.mode != AA_UPMIX_OFF)
-        probe_log("aa_upmix.mode value=%s device=%s", aa.mode == AA_UPMIX_ON ? "on" : "probe",
-                  SQ5_AA_MEDIA_DEVICE);
+        probe_log("aa_upmix.mode value=%s device=%s normalize_default_mode=1",
+                  aa.mode == AA_UPMIX_ON ? "on" : "probe", SQ5_AA_MEDIA_DEVICE);
 }
 
 static enum aa_upmix_mode current_mode(void)
@@ -99,14 +109,30 @@ static enum aa_upmix_mode current_mode(void)
     return aa.mode;
 }
 
+static int parse_level(const char *value, int fallback)
+{
+    char *end = NULL;
+    long level = value ? strtol(value, &end, 10) : fallback;
+    if (!value || end == value || *end || level < 0 || level >= SPA_UPMIX_LEVEL_COUNT)
+        return fallback;
+    return (int)level;
+}
+
 static int requested_level(void)
 {
+    const char *path = getenv(SQ5_AA_LEVEL_FILE_ENV);
     const char *value = getenv(SQ5_AA_LEVEL_ENV);
-    char *end = NULL;
-    long level = value ? strtol(value, &end, 10) : SPA_UPMIX_LEVEL_NORMAL;
-    if (!value || end == value || *end || level < 0 || level >= SPA_UPMIX_LEVEL_COUNT)
-        return SPA_UPMIX_LEVEL_NORMAL;
-    return (int)level;
+    char line[16];
+    FILE *file;
+    int fallback = parse_level(value, SPA_UPMIX_LEVEL_NORMAL);
+    if (!path || !*path) path = SQ5_AA_LEVEL_FILE;
+    file = fopen(path, "r");
+    if (!file) return fallback;
+    line[0] = 0;
+    if (!fgets(line, sizeof(line), file)) line[0] = 0;
+    fclose(file);
+    line[strcspn(line, "\r\n")] = 0;
+    return parse_level(line, fallback);
 }
 
 static const struct scene_mask_weights *load_mask(void)
@@ -177,6 +203,7 @@ static int start_dsp_locked(void)
     }
     result = spa_stereo_upmix_init(&aa.dsp, &config);
     aa.dsp_ready = result == SPA_STEREO_UPMIX_OK;
+    aa.active_level = config.level;
     probe_log("aa_upmix.dsp ready=%d level=%d mask=%d init=%d", aa.dsp_ready,
               config.level, blob != NULL, result);
     if (!aa.dsp_ready) stop_dsp_locked();
@@ -210,7 +237,8 @@ HOOK_EXPORT int snd_pcm_open_name(snd_pcm_t **handle, char *name, int mode)
         aa.expanded = aa.dsp_ready = 0;
         aa.source_channels = aa.target_channels = 0;
         aa.source_fragment = aa.target_fragment = 0;
-        aa.writes = aa.failures = aa.short_writes = 0;
+        aa.writes = aa.prepares = aa.flushes = 0;
+        aa.failures = aa.short_writes = 0;
         pthread_mutex_unlock(&aa.state_lock);
         pthread_mutex_unlock(&aa.io_lock);
         probe_log("aa_upmix.open handle=%p mode=0x%x", *handle, mode);
@@ -228,6 +256,7 @@ HOOK_EXPORT int snd_pcm_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_
     snd_pcm_channel_info_t info;
     struct sq5_aa_pcm_geometry source, target;
     struct sq5_aa_pcm_caps caps;
+    size_t requested_source_fragment;
     int tracked, result, compatible, dsp_ok;
 
     if (!real) real = (params_fn)dlsym(RTLD_NEXT, "snd_pcm_plugin_params");
@@ -238,6 +267,10 @@ HOOK_EXPORT int snd_pcm_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_
     if (!tracked || !params || current_mode() == AA_UPMIX_OFF) return real(handle, params);
 
     pthread_mutex_lock(&aa.io_lock);
+    /* Match Luka's proven ownership rule: every libasound call made while we
+     * own the QSA transaction must see physical geometry in any PLT callback
+     * it makes into our setup/prepare/flush interposers. */
+    set_real_io(1);
     /* A new params transaction invalidates the previous QSA geometry before
      * any fallible probe or native call.  Every refusal below therefore
      * leaves writes on the native/stereo path, never on stale PCM6 state. */
@@ -256,13 +289,17 @@ HOOK_EXPORT int snd_pcm_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_
               info.min_fragment_size, info.max_fragment_size, (unsigned)info.formats);
     if (current_mode() == AA_UPMIX_PROBE || result != 0) {
         result = real(handle, params);
+        set_real_io(0);
         pthread_mutex_unlock(&aa.io_lock);
         return result;
     }
 
-    compatible = params->channel == SND_PCM_CHANNEL_PLAYBACK &&
-                 params->mode == SND_PCM_MODE_BLOCK &&
-                 params->format.format == SND_PCM_SFMT_S16_LE &&
+    /* This GAL build leaves channel/mode at their zero/default values even
+     * though the exact named handle was opened for playback.  The format and
+     * fragment fields are valid.  The handle identity and open mode are the
+     * authoritative route boundary; normalize channel/mode only in our private
+     * copy before configuring the PCM6 device. */
+    compatible = params->format.format == SND_PCM_SFMT_S16_LE &&
                  params->format.rate == SQ5_AA_UPMIX_RATE &&
                  params->format.voices == SQ5_AA_UPMIX_SOURCE_CHANNELS;
     source.rate = compatible ? (unsigned)params->format.rate : 0;
@@ -272,27 +309,42 @@ HOOK_EXPORT int snd_pcm_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_
     caps.max_channels = info.max_voices > 0 ? (unsigned)info.max_voices : 0;
     caps.max_fragment_bytes = info.max_fragment_size > 0 ?
                               (size_t)info.max_fragment_size : 0;
+    requested_source_fragment = source.fragment_bytes;
+    if (compatible)
+        source.fragment_bytes =
+            sq5_aa_upmix_select_source_fragment(requested_source_fragment, &caps);
+    if (source.fragment_bytes && source.fragment_bytes != requested_source_fragment)
+        probe_log("aa_upmix.fragment requested=%u selected=%u target=%u",
+                  (unsigned)requested_source_fragment,
+                  (unsigned)source.fragment_bytes,
+                  (unsigned)(source.fragment_bytes * SQ5_AA_UPMIX_TARGET_CHANNELS /
+                             SQ5_AA_UPMIX_SOURCE_CHANNELS));
     if (!compatible || !sq5_aa_upmix_plan(&source, &caps, &target)) {
-        probe_log("aa_upmix.bypass reason=geometry rate=%d format=%d voices=%d frag=%d max=%d/%d",
-                  params->format.rate, params->format.format, params->format.voices,
+        probe_log("aa_upmix.bypass reason=geometry channel=%d mode=%d rate=%d format=%d voices=%d frag=%d max=%d/%d",
+                  params->channel, params->mode, params->format.rate,
+                  params->format.format, params->format.voices,
                   params->buf.block.frag_size, info.max_voices, info.max_fragment_size);
         result = real(handle, params);
+        set_real_io(0);
         pthread_mutex_unlock(&aa.io_lock);
         return result;
     }
 
     adjusted = *params;
+    adjusted.channel = SND_PCM_CHANNEL_PLAYBACK;
+    adjusted.mode = SND_PCM_MODE_BLOCK;
     adjusted.format.voices = SQ5_AA_UPMIX_TARGET_CHANNELS;
     adjusted.buf.block.frag_size = (int)target.fragment_bytes;
-    if (adjusted.buf.block.frags_max < SQ5_AA_MAX_FRAGS)
-        adjusted.buf.block.frags_max = SQ5_AA_MAX_FRAGS;
-    if (adjusted.buf.block.frags_min < SQ5_AA_MIN_FRAGS)
-        adjusted.buf.block.frags_min = SQ5_AA_MIN_FRAGS;
+    if (adjusted.buf.block.frags_max < SQ5_AA_REQUIRED_FRAGS)
+        adjusted.buf.block.frags_max = SQ5_AA_REQUIRED_FRAGS;
+    if (adjusted.buf.block.frags_min > adjusted.buf.block.frags_max)
+        adjusted.buf.block.frags_min = adjusted.buf.block.frags_max;
     result = real(handle, &adjusted);
     if (result != 0) {
         probe_log("aa_upmix.bypass reason=params result=%d why=0x%x", result,
                   (unsigned)adjusted.why_failed);
         result = real(handle, params);
+        set_real_io(0);
         pthread_mutex_unlock(&aa.io_lock);
         return result;
     }
@@ -309,6 +361,7 @@ HOOK_EXPORT int snd_pcm_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_
                   actual.format.rate, actual.format.format, actual.format.voices,
                   actual.buf.block.frag_size);
         result = real(handle, params);
+        set_real_io(0);
         pthread_mutex_unlock(&aa.io_lock);
         return result;
     }
@@ -325,6 +378,7 @@ HOOK_EXPORT int snd_pcm_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_
     pthread_mutex_unlock(&aa.state_lock);
     if (!dsp_ok) {
         result = real(handle, params);
+        set_real_io(0);
         pthread_mutex_unlock(&aa.io_lock);
         return result;
     }
@@ -332,6 +386,7 @@ HOOK_EXPORT int snd_pcm_plugin_params(snd_pcm_t *handle, snd_pcm_channel_params_
               source.channels, source.rate, (unsigned)source.fragment_bytes,
               target.channels, target.rate, (unsigned)target.fragment_bytes,
               adjusted.buf.block.frags_min, adjusted.buf.block.frags_max);
+    set_real_io(0);
     pthread_mutex_unlock(&aa.io_lock);
     return 0;
 }
@@ -352,6 +407,7 @@ HOOK_EXPORT int snd_pcm_plugin_setup(snd_pcm_t *handle, snd_pcm_channel_setup_t 
     pthread_mutex_unlock(&aa.state_lock);
     if (!expanded || !setup) return real(handle, setup);
     pthread_mutex_lock(&aa.io_lock);
+    set_real_io(1);
     actual = *setup;
     result = real(handle, &actual);
     if (!result && actual.format.voices == SQ5_AA_UPMIX_TARGET_CHANNELS &&
@@ -368,19 +424,85 @@ HOOK_EXPORT int snd_pcm_plugin_setup(snd_pcm_t *handle, snd_pcm_channel_setup_t 
                   actual.format.voices, actual.buf.block.frag_size);
         result = -EIO;
     }
+    set_real_io(0);
     pthread_mutex_unlock(&aa.io_lock);
     return result;
 }
 
-HOOK_EXPORT ssize_t snd_pcm_plugin_write(snd_pcm_t *handle, const void *buffer, size_t size)
+/* QSA's plugin prepare path calls snd_pcm_plugin_setup through its own PLT.
+ * That nested call belongs to libasound and must see the physical PCM6
+ * geometry.  Only GAL's outer setup call receives the translated stereo
+ * geometry.  Without this ownership guard MU0918 aborts the media sink before
+ * its first write: params/readback succeed, phone PCM arrives, then the handle
+ * closes with writes=0. */
+HOOK_EXPORT int snd_pcm_plugin_prepare(snd_pcm_t *handle, int channel)
 {
-    static write_fn real;
+    static prepare_fn real;
+    int expanded, native_channel, result;
+    uint64_t call_number;
+
+    if (!real) real = (prepare_fn)dlsym(RTLD_NEXT, "snd_pcm_plugin_prepare");
+    if (!real) return -EIO;
+    if (inside_real_io()) return real(handle, channel);
+    pthread_mutex_lock(&aa.state_lock);
+    expanded = handle && handle == aa.handle && aa.expanded;
+    pthread_mutex_unlock(&aa.state_lock);
+    if (!expanded) return real(handle, channel);
+
+    native_channel = SND_PCM_CHANNEL_PLAYBACK;
+    pthread_mutex_lock(&aa.io_lock);
+    set_real_io(1);
+    result = real(handle, native_channel);
+    set_real_io(0);
+    pthread_mutex_lock(&aa.state_lock);
+    call_number = ++aa.prepares;
+    pthread_mutex_unlock(&aa.state_lock);
+    pthread_mutex_unlock(&aa.io_lock);
+    probe_log("aa_upmix.prepare n=%llu requested=%d native=%d result=%d",
+              (unsigned long long)call_number, channel, native_channel, result);
+    return result;
+}
+
+HOOK_EXPORT int snd_pcm_plugin_flush(snd_pcm_t *handle, int channel)
+{
+    static flush_fn real;
+    int expanded, result;
+    uint64_t call_number;
+
+    if (!real) real = (flush_fn)dlsym(RTLD_NEXT, "snd_pcm_plugin_flush");
+    if (!real) return -EIO;
+    if (inside_real_io()) return real(handle, channel);
+    pthread_mutex_lock(&aa.state_lock);
+    expanded = handle && handle == aa.handle && aa.expanded;
+    pthread_mutex_unlock(&aa.state_lock);
+    if (!expanded) return real(handle, channel);
+
+    pthread_mutex_lock(&aa.io_lock);
+    set_real_io(1);
+    result = real(handle, SND_PCM_CHANNEL_PLAYBACK);
+    set_real_io(0);
+    pthread_mutex_lock(&aa.state_lock);
+    call_number = ++aa.flushes;
+    pthread_mutex_unlock(&aa.state_lock);
+    pthread_mutex_unlock(&aa.io_lock);
+    probe_log("aa_upmix.flush n=%llu requested=%d native=%d result=%d",
+              (unsigned long long)call_number, channel,
+              SND_PCM_CHANNEL_PLAYBACK, result);
+    return result;
+}
+
+static ssize_t upmix_write(snd_pcm_t *handle, const void *buffer, size_t size,
+                           write_fn real, const char *api)
+{
     size_t frames, target_bytes;
     ssize_t written;
     int expanded, process_result;
     uint64_t write_number;
-    if (!real) real = (write_fn)dlsym(RTLD_NEXT, "snd_pcm_plugin_write");
     if (!real) return -EIO;
+    /* snd_pcm_plugin_write may call snd_pcm_write internally.  The outer
+     * interposer has already expanded that buffer, so the nested raw boundary
+     * must pass through unchanged instead of expanding a second time. */
+    if (inside_real_io()) return real(handle, buffer, size);
     pthread_mutex_lock(&aa.state_lock);
     expanded = handle && handle == aa.handle && aa.expanded && aa.dsp_ready;
     pthread_mutex_unlock(&aa.state_lock);
@@ -393,6 +515,14 @@ HOOK_EXPORT ssize_t snd_pcm_plugin_write(snd_pcm_t *handle, const void *buffer, 
 
     pthread_mutex_lock(&aa.io_lock);
     pthread_mutex_lock(&aa.state_lock);
+    if ((aa.writes % SQ5_AA_LEVEL_POLL_WRITES) == 0u) {
+        int level = requested_level();
+        if (level != aa.active_level) {
+            spa_stereo_upmix_set_level(&aa.dsp, level);
+            aa.active_level = level;
+            probe_log("aa_upmix.level value=%d source=shared-menu", level);
+        }
+    }
     process_result = spa_stereo_upmix_process_s16(&aa.dsp, (const int16_t *)buffer,
                                                    frames, aa.output, frames);
     if (process_result != SPA_STEREO_UPMIX_OK) {
@@ -407,10 +537,10 @@ HOOK_EXPORT ssize_t snd_pcm_plugin_write(snd_pcm_t *handle, const void *buffer, 
     pthread_mutex_lock(&aa.state_lock);
     if (written >= 0 && (size_t)written < target_bytes) aa.short_writes++;
     if (write_number == 1 || write_number % 1024u == 0)
-        probe_log("aa_upmix.write n=%llu frames=%u result=%d/%u dsp_fail=%llu short=%llu",
-                  (unsigned long long)write_number, (unsigned)frames, (int)written,
-                  (unsigned)target_bytes, (unsigned long long)aa.failures,
-                  (unsigned long long)aa.short_writes);
+        probe_log("aa_upmix.write api=%s n=%llu frames=%u result=%d/%u dsp_fail=%llu short=%llu",
+                  api, (unsigned long long)write_number, (unsigned)frames,
+                  (int)written, (unsigned)target_bytes,
+                  (unsigned long long)aa.failures, (unsigned long long)aa.short_writes);
     pthread_mutex_unlock(&aa.state_lock);
     pthread_mutex_unlock(&aa.io_lock);
     if (written <= 0) return written;
@@ -418,11 +548,25 @@ HOOK_EXPORT ssize_t snd_pcm_plugin_write(snd_pcm_t *handle, const void *buffer, 
     return (ssize_t)sq5_aa_upmix_source_bytes((size_t)written);
 }
 
+HOOK_EXPORT ssize_t snd_pcm_plugin_write(snd_pcm_t *handle, const void *buffer, size_t size)
+{
+    static write_fn real;
+    if (!real) real = (write_fn)dlsym(RTLD_NEXT, "snd_pcm_plugin_write");
+    return upmix_write(handle, buffer, size, real, "plugin");
+}
+
+HOOK_EXPORT ssize_t snd_pcm_write(snd_pcm_t *handle, const void *buffer, size_t size)
+{
+    static write_fn real;
+    if (!real) real = (write_fn)dlsym(RTLD_NEXT, "snd_pcm_write");
+    return upmix_write(handle, buffer, size, real, "raw");
+}
+
 HOOK_EXPORT int snd_pcm_close(snd_pcm_t *handle)
 {
     static close_fn real;
     int tracked, result;
-    uint64_t writes, failures, short_writes;
+    uint64_t writes, prepares, flushes, failures, short_writes;
     if (!real) real = (close_fn)dlsym(RTLD_NEXT, "snd_pcm_close");
     if (!real) return -1;
     pthread_mutex_lock(&aa.state_lock);
@@ -430,9 +574,12 @@ HOOK_EXPORT int snd_pcm_close(snd_pcm_t *handle)
     pthread_mutex_unlock(&aa.state_lock);
     if (!tracked) return real(handle);
     pthread_mutex_lock(&aa.io_lock);
+    set_real_io(1);
     result = real(handle);
+    set_real_io(0);
     pthread_mutex_lock(&aa.state_lock);
-    writes = aa.writes; failures = aa.failures; short_writes = aa.short_writes;
+    writes = aa.writes; prepares = aa.prepares; flushes = aa.flushes;
+    failures = aa.failures; short_writes = aa.short_writes;
     stop_dsp_locked();
     aa.handle = NULL;
     aa.expanded = 0;
@@ -440,7 +587,8 @@ HOOK_EXPORT int snd_pcm_close(snd_pcm_t *handle)
     aa.source_fragment = aa.target_fragment = 0;
     pthread_mutex_unlock(&aa.state_lock);
     pthread_mutex_unlock(&aa.io_lock);
-    probe_log("aa_upmix.close result=%d writes=%llu dsp_fail=%llu short=%llu", result,
+    probe_log("aa_upmix.close result=%d prepares=%llu flushes=%llu writes=%llu dsp_fail=%llu short=%llu", result,
+              (unsigned long long)prepares, (unsigned long long)flushes,
               (unsigned long long)writes, (unsigned long long)failures,
               (unsigned long long)short_writes);
     return result;

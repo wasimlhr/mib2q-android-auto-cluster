@@ -9,7 +9,8 @@ LSD=${STOCK_JAR:?set STOCK_JAR to the firmware-derived compatibility jar}
 LSDIC=${COMPILE_JAR:-$LSD}
 DRIVE_LOG=${DRIVE_LOG:-}
 FIRMWARE_PROFILE_ID=${FIRMWARE_PROFILE_ID:-mhi2q_us_aug22_p3639_mu0918}
-PROFILE_SOURCE_DIR=firmware/$FIRMWARE_PROFILE_ID/src
+FIRMWARE_JAVA_PROFILE_ID=${FIRMWARE_JAVA_PROFILE_ID:-$FIRMWARE_PROFILE_ID}
+PROFILE_SOURCE_DIR=firmware/$FIRMWARE_JAVA_PROFILE_ID/src
 JAR=build/mib2q_android_auto_cluster.jar
 export LC_ALL=C
 
@@ -51,7 +52,7 @@ find src -name '*.java' | grep -v '/com/luka/carplay/core/CarPlayApp.java$' | wh
 done > build/check/sources.txt
 [ -z "$PROFILE_SOURCES" ] || printf '%s\n' "$PROFILE_SOURCES" >> build/check/sources.txt
 find build/gen -name '*.java' >> build/check/sources.txt
-echo "Compiling $(wc -l < build/check/sources.txt | tr -d ' ') sources (Java 1.4 bytecode) profile=$FIRMWARE_PROFILE_ID build=$BUILD_ID"
+echo "Compiling $(wc -l < build/check/sources.txt | tr -d ' ') sources (Java 1.4 bytecode) profile=$FIRMWARE_PROFILE_ID java_profile=$FIRMWARE_JAVA_PROFILE_ID build=$BUILD_ID"
 # compile-only stand-ins for stock classes the rebuilt key controller references but lsd.jar lacks
 # (present on the unit, e.g. TerminalModeUtils): first on -cp, never packaged
 rm -rf build/cstubs; mkdir -p build/cstubs
@@ -81,6 +82,8 @@ de.audi.app.terminalmode.ExternalEventsListener
 de.audi.app.earlyfunc.evo.parking.ParkingSystemControllerComponentEvo
 de.audi.app.earlyfunc.core.parking.ParkingPartialPopupHandler
 de.audi.audio.context.AudioDrawerContextImpl
+de.audi.tghu.storage.FlushValuesDict
+de.audi.tghu.tone.hmi.Activator
 de.esolutions.hmi.widgets.audi.evo.high.PartialPopupManagerEvoHigh"
 echo "$REPLACED" > build/check/replaced.txt
 jar tf "$LSDIC" | grep '\.class$' | sort -u > build/check/stock-classes.txt

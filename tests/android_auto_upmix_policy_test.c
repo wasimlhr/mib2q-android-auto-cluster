@@ -8,6 +8,10 @@ int main(void)
     struct sq5_aa_pcm_caps stock = {2, 3072};
     struct sq5_aa_pcm_caps patched = {6, 9216};
 
+    assert(sq5_aa_upmix_select_source_fragment(3072, &patched) == 3072);
+    assert(sq5_aa_upmix_select_source_fragment(9216, &patched) == 3072);
+    assert(sq5_aa_upmix_select_source_fragment(3073, &patched) == 0);
+    assert(sq5_aa_upmix_select_source_fragment(3072, &stock) == 0);
     assert(!sq5_aa_upmix_plan(&source, &stock, &target));
     assert(sq5_aa_upmix_plan(&source, &patched, &target));
     assert(target.rate == 48000 && target.channels == 6 && target.fragment_bytes == 9216);

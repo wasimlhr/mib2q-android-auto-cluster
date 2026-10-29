@@ -45,7 +45,7 @@ static void load_insets(void)
 {
     unsigned a, b, c, d, e, g, h, k;
     FILE *f = fopen("/fs/sda0/sq5_cluster_insets", "r");
-    if (!f) f = fopen("/mnt/app/root/sq5_android_auto/sq5_cluster_insets", "r");
+    if (!f) f = fopen("/mnt/app/root/sq5_cluster_live/sq5_cluster_insets", "r");   /* the car's copy (live.sh unit_sync) */
     ui_top = UI_TOP; ui_bottom = UI_BOTTOM; ui_left = UI_LEFT; ui_right = UI_RIGHT;
     sm_top = SM_TOP; sm_bottom = SM_BOTTOM; sm_left = SM_LEFT; sm_right = SM_RIGHT;
     if (!f) return;
@@ -139,7 +139,13 @@ static char *heap_copy(const unsigned char *p, unsigned n)
 /* Run 153 (owner): the roller "zoom" only resizes Google's layout area (card size / layout), not the map scale
  * or text - the owner liked Sport at +4 from that base (= the original preset at step +3, width 370 -> 562 around
  * its centre) -> Sport default. */
-static const uint32_t vp_preset[3][4] = { { 97, 167, 350, 370 } /* right +20: gap before our tile frame at 1081 */, { 97, 167, 510, 510 }, { 78, 146, 484, 394 } };   /* run 125: S +476 = the B9Sport small-stage offset (the Sport panel shows terminal x >= 476) */
+/* Run 168 (owner: "Google in Sport doesn't draw the card properly or compact; Waze works"): the +4 Sport area
+ * (562 wide, frame x 724..1286) is wider than the visible Sport window (terminal x 476..956 = frame x 716..1196),
+ * so Google switched to its wide layout and put the full card right of the car at frame x 1014..1280 - its
+ * right third behind the rev-counter dial. Sport area = exactly the visible window now (480 wide, frame
+ * x 716..1196 = preset left 476, right 484): nothing laid out where it cannot be seen, car centred in the
+ * panel; at 370 wide Google used the compact card on top. The roller still narrows/widens it live. */
+static const uint32_t vp_preset[3][4] = { { 97, 167, 350, 370 } /* right +20: gap before our tile frame at 1081 */, { 97, 167, 510, 510 }, { 78, 146, 476, 484 } };   /* run 125: S +476 = the B9Sport small-stage offset (the Sport panel shows terminal x >= 476) */
 /* Run 117 (owner photos): the phone measures the insets from the FULL 1920x1080 frame, not from the 1440x540
  * viewport (Large card edge at cockpit ~1309 = 1550 - 240) -> add the viewport offset to every preset. */
 #define VP_OX 240u
@@ -437,7 +443,7 @@ int live_dpi(int res)
     if (size < 1 || size > 5) size = 3;   /* run 154: Large (125 dpi at 1080p = the panel's 125 PPI) */
     d = res == 3 ? map1080[size] : res == 2 ? map720[size] : 160;
     f = fopen("/fs/sda0/sq5_cluster_dpi", "r");
-    if (!f) f = fopen("/mnt/app/root/sq5_android_auto/sq5_cluster_dpi", "r");
+    if (!f) f = fopen("/mnt/app/root/sq5_cluster_live/sq5_cluster_dpi", "r");
     if (f) { if (fscanf(f, "%d", &v) == 1 && v >= 80 && v <= 400) { d = v; src = "file"; } fclose(f); }
     probe_log("dpi res=%d size=%d value=%d source=%s", res, size, d, src);
     return d;

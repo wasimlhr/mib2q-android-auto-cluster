@@ -1,0 +1,41 @@
+{
+  "id": "mhi2q_kr_aug22_p1201_mu1201",
+  "label": "MHI2Q_KR_AUG22_P1201 MU1201",
+  "status": "offline-port-verified-pilot-pending",
+  "installable": false,
+  "java_source_profile": "mhi2q_us_aug22_p5145_mu1316",
+  "notes": [
+    "The supplied backup copied and byte-compared gal, libautoreceiver.so, lsd.jxe, smartphone_integrator.json and gal.json successfully.",
+    "libautoreceiver.so is byte-identical to the validated MU0918 receiver; every receiver-side hook symbol and object offset is therefore identical.",
+    "The MU1201 GAL executable has a reviewed firmware-specific safety fingerprint: CGALController::s_instance at 0x259598 and CVideoSinkImpl vtable at 0x252b40.",
+    "All 14 stock outer classes replaced by the Android Auto overlay are byte-identical to MU1316 P5145 and reuse that profile's four Java overrides.",
+    "The MU1201 stock and InnerClasses-repaired compile JARs passed all replaced-class member/header gates and 162 host behavior assertions.",
+    "This profile covers the Android Auto cluster/HUD path; the optional external-amplifier upmix driver path is not validated because the backup did not include deva-ctrl-qc.so.",
+    "Installation remains blocked until one read-only audit and an on-car pilot confirm this Korean unit's cockpit terminal/window behavior."
+  ],
+  "files": {
+    "gal": {
+      "size": 1405916,
+      "sha256": "e35627a08a01980f9b56000b8fbd4b4fae5d9b4c8f7dcd22c4818124fc5f1ef5",
+      "posix_cksum": 180845437
+    },
+    "libautoreceiver.so": {
+      "size": 1069943,
+      "sha256": "6ef4abea8264ab7787b0ecb3fe278a65488301f703148d0175010f7b228bdaf6",
+      "posix_cksum": 1653920605
+    },
+    "lsd.jxe": {
+      "size": 61141973,
+      "sha256": "5bc537679c457f2f670966e25270d88612a23c4b9d91c65cdf4faea5a9f2ae7d",
+      "posix_cksum": 1468223964
+    },
+    "stock_jar": {
+      "size": 41674938,
+      "sha256": "f0c1c41e43b78acbec460d072a460e6e99d7b9b268a88bd95b9310c4fdde4145"
+    },
+    "compile_jar": {
+      "size": 42073064,
+      "sha256": "59419c3e7bc8617918602d3bcc8e65f335e471769332ff426adedc58e29fe1f2"
+    }
+  }
+}

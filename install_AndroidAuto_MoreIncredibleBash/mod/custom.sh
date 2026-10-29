@@ -20,19 +20,20 @@ SD=$(rooted /fs/sda0)
 [ -d "$SD" ] || SD=$(rooted /net/mmx/fs/sda0)
 RES=$MOD/android-auto
 PROFILES=$RES/profiles.list
-BASE=$(rooted /mnt/app/root/sq5_android_auto)
+CAR_BASE=/mnt/app/root/sq5_android_auto
+BASE=$(rooted "$CAR_BASE")
 BACKUP=$BASE/backup
 CFG=$(rooted /mnt/system/etc/eso/production/smartphone_integrator.json)
 JAR=$(rooted /mnt/app/eso/hmi/lsd/jars/mib2q_android_auto_cluster.jar)
 GAL=$(rooted /mnt/app/eso/bin/apps/gal)
 RECEIVER=$(rooted /mnt/app/eso/lib/libautoreceiver.so)
 LSD=$(rooted /ifs/lsd.jxe)
-FILES="libsq5_cluster_live.so cluster-player maneuver_render flag_atlas.rgba scene_masknet_c.bin gal_startup.sh
+FILES="libsq5_cluster_live.so cluster-player maneuver_render flag_atlas.rgba scene_masknet_c.bin gal_launcher gal_startup.sh
 sq5_luka_monitor.sh sq5_luka_processes.sh sq5_luka_cleanup.sh"
 
 size_of() { set -- $(ls -l "$1" 2>/dev/null); echo ${5:-0}; }
 sum_of() { set -- $(cksum "$1" 2>/dev/null); echo "${1:-0} ${2:-0}"; }
-mode_for() { case $1 in *.sh|cluster-player|maneuver_render|*.so) echo 755;; *) echo 644;; esac; }
+mode_for() { case $1 in *.sh|cluster-player|maneuver_render|gal_launcher|*.so) echo 755;; *) echo 644;; esac; }
 fail() { echo "FAILED: $*"; exit 1; }
 
 verify_payload() {
@@ -44,7 +45,7 @@ verify_payload() {
         [ -z "${extra:-}" ] || fail "malformed manifest line for $name"
         case "$name" in *..*|/*|*\\*) fail "unsafe manifest entry $name";; esac
         case "$name" in
-            libsq5_cluster_live.so|cluster-player|maneuver_render|flag_atlas.rgba|scene_masknet_c.bin|gal_startup.sh|\
+            libsq5_cluster_live.so|cluster-player|maneuver_render|flag_atlas.rgba|scene_masknet_c.bin|gal_launcher|gal_startup.sh|\
             sq5_luka_monitor.sh|sq5_luka_processes.sh|sq5_luka_cleanup.sh|\
             config_tool|profiles.list) core=$((core+1));;
             profiles/*/mib2q_android_auto_cluster.jar) jars=$((jars+1));;
@@ -53,7 +54,7 @@ verify_payload() {
         [ "$(sum_of "$RES/$name")" = "$crc $bytes" ] || fail "payload checksum $name"
         count=$((count+1))
     done < "$RES/manifest.cksum"
-    [ "$core" = 11 ] || fail "manifest has $core common/profile-index files, expected 11"
+    [ "$core" = 12 ] || fail "manifest has $core common/profile-index files, expected 12"
     [ "$jars" -ge 1 ] || fail "manifest has no firmware Java payload"
     [ "$count" = $((core+jars)) ] || fail "manifest entry accounting failed"
 }
@@ -129,14 +130,22 @@ collect_logs() {
     stamp=$(date +%Y%m%d_%H%M%S 2>/dev/null || echo unknown)
     run=$SD/mib2q-aa-logs/run-$stamp-$$
     count=0
-    for src in "$tmp"/mib2q_aa_startup.log "$tmp"/sq5_cluster_player.log \
+    mkdir -p "$run" || return 0
+    for src in "$tmp"/mib2q_aa_launcher.log "$tmp"/mib2q_aa_startup.log "$tmp"/sq5_cluster_player.log \
                "$tmp"/sq5_luka_wrapper.log "$tmp"/maneuver_render.log \
                "$tmp"/sq5_cluster_live-hook-*.log; do
         [ -f "$src" ] || continue
-        [ "$count" -gt 0 ] || mkdir -p "$run" || return 0
         cp "$src" "$run/${src##*/}" 2>/dev/null && count=$((count+1))
     done
-    [ "$count" -eq 0 ] || echo "Saved $count Android Auto log(s) to $run"
+    {
+        echo "runtime_logs=$count"
+        echo "gal_exec=$(launch_value exec)"
+        echo "gal_path=$(launch_value path)"
+        echo "profile=$(cat "$BASE/profile.id" 2>/dev/null || echo none)"
+        ls -l "$BASE" 2>/dev/null || true
+    } > "$run/status.txt"
+    cp "$CFG" "$run/smartphone_integrator.json" 2>/dev/null || true
+    echo "Saved Android Auto diagnostics ($count runtime log(s)) to $run"
 }
 
 put() {
@@ -156,7 +165,7 @@ install_it() {
         fail "firmware does not match an installable profile; run scripts/check_firmware.py and port first"
     fi
     ex=$(launch_value exec); pa=$(launch_value path)
-    if [ "$pa/$ex" = "$BASE/gal_startup.sh" ]; then
+    if [ "$pa/$ex" = "$CAR_BASE/gal_launcher" ] || [ "$pa/$ex" = "$CAR_BASE/gal_startup.sh" ]; then
         [ -f "$BACKUP/smartphone_integrator.json" ] || fail "installed launch has no backup"
     elif [ "$pa/$ex" = "/mnt/app/eso/bin/apps/gal" ]; then
         :

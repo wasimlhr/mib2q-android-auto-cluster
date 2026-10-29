@@ -104,8 +104,9 @@ $CC -O2 -ftree-vectorize -march=armv7-a -mfloat-abi=softfp -mfpu=neon \
     /src/hook/audio/scene_clusters.c /src/hook/audio/scene_engine.c \
     /src/hook/audio/scene_mask.c /src/hook/audio/scene_mask_worker.c \
     -o libsq5_cluster_live.so -lc -lm
-sed -e 's/probe_startup.sh/gal_startup.sh/g' -e 's@sq5_cluster_probe@sq5_android_auto@g' config_tool.c > live_config.c
+sed -e 's/probe_startup.sh/gal_launcher/g' -e 's@sq5_cluster_probe@sq5_android_auto@g' config_tool.c > live_config.c
 $CC -O2 -std=gnu99 -Wall -Wextra -Werror live_config.c -o config_tool -lc
+$CC -O2 -std=gnu99 -Wall -Wextra -Werror /src/android_auto/hook/src/gal_launcher.c -o gal_launcher -lc
 $CC -O2 -std=gnu99 -Wall -Wextra jarpatch.c -o jarpatch -lc
 grep -hoE 'screen_[a-z_]+' player.c cluster_surface.c | sort -u | sed 's/.*/int &(){return 0;}/' > screen_stub.c
 $CC -shared -fPIC -Wl,-soname,libscreen.so.1 screen_stub.c -o libscreen.so.1
@@ -117,7 +118,7 @@ $CC -O2 -ftree-vectorize -march=armv7-a -mfloat-abi=softfp -mfpu=neon -std=gnu99
 # Hardware decode probe (src/omx_probe.c, 2026-09-30): standalone, dlopens the unit's libOmxCore.so.
 $CC -O2 -std=gnu99 -Wall -Wextra -I"$SRC/vendor/openmax" omx_probe.c -o omx_probe -lc
 mkdir -p "$OUT"
-cp libsq5_cluster_live.so cluster-player config_tool jarpatch omx_probe "$OUT/"
+cp libsq5_cluster_live.so cluster-player config_tool gal_launcher jarpatch omx_probe "$OUT/"
 cp live_hook.c "$OUT/"
 $RE -h cluster-player | grep -E 'Class:|Machine:|Type:'
 $RE -d cluster-player libsq5_cluster_live.so | grep NEEDED

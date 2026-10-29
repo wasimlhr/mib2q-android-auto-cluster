@@ -1,16 +1,28 @@
 {
   "id": "mhi2q_us_aug22_p5145_mu1316",
   "label": "MHI2Q_US_AUG22_P5145 MU1316",
-  "status": "java-port-verified-native-pending",
+  "status": "offline-port-verified-pilot-pending",
   "installable": false,
   "notes": [
-    "The firmware-facing Java overlay compiles and passes the stock member/header gate against the supplied MU1316 lsd.jxe extraction.",
-    "Installation remains blocked until exact stock gal and libautoreceiver.so files are captured and their native ABI seams are reviewed."
+    "The supplied 2020 SQ5 backup copied and byte-compared gal, libautoreceiver.so, lsd.jxe, smartphone_integrator.json and gal.json successfully.",
+    "libautoreceiver.so is byte-identical to the validated MU0918 receiver, so every receiver-side hook symbol and checked object offset is identical.",
+    "The MU1316 GAL executable has a reviewed firmware-specific safety fingerprint: CGALController::s_instance at 0x258580 and CVideoSinkImpl vtable at 0x251b28.",
+    "Its GAL dynamic symbol surface matches the reviewed MU1201 GAL except that MU1201 exports one additional unused ActiveObject constructor; the cluster video vtable has the same 196-byte shape.",
+    "The firmware-facing Java overlay compiles and passes all stock member/header gates and 162 host behavior assertions against the exact supplied MU1316 lsd.jxe-derived JARs.",
+    "This profile covers Android Auto cluster video, cockpit/HUD integration and steering-wheel controls; experimental external-amplifier upmix is excluded from the pilot.",
+    "Installation remains blocked in the public profile until one controlled on-car pilot confirms this unit's cockpit terminal/window behavior."
   ],
-  "detection": {
-    "gal_size_observed": 1405891
-  },
   "files": {
+    "gal": {
+      "size": 1405891,
+      "sha256": "cd00d89deb69c1b0322bf9354b4de1e25f595b298cfc1c1238242b0bffdb6f94",
+      "posix_cksum": 2375183993
+    },
+    "libautoreceiver.so": {
+      "size": 1069943,
+      "sha256": "6ef4abea8264ab7787b0ecb3fe278a65488301f703148d0175010f7b228bdaf6",
+      "posix_cksum": 1653920605
+    },
     "lsd.jxe": {
       "size": 60604861,
       "sha256": "abaf73d1e72e7178770e8a2b553cfd7afc954785b59f6db77bbb4c8700d3244b",

@@ -1,5 +1,5 @@
 /*
- * MMI Sound effects "CarPlay UpMix" level: Java owns it.
+ * MMI Sound effects shared phone 5.1 UpMix level: Java owns it.
  *
  * Stored in the stock HMI persistence (IStorageAccess, the Sound app's namespace
  * 1009, our key 1000) and flushed to flash on every write through the shared
@@ -28,7 +28,8 @@ public final class UpmixSetting {
     private static final int NAMESPACE = 1009;     // the Sound app's own (WirelessChargingReminder: 1009/1)
     private static final int KEY = 1000;
     private static final int NORMAL = 2, COUNT = 5;
-    static final String TMP_FILE = "/tmp/carplay_upmix_level";   // hook/audio/upmix_level.c
+    /* Kept for ABI/deployment compatibility; both CarPlay and Android Auto read it. */
+    static final String TMP_FILE = "/tmp/carplay_upmix_level";
 
     private static volatile IFrameworkAccess fw;
     /* DSI AmplifierCapabilities.amplifier (org.dsi.ifc.audio DEVICETYPE_*) as the stock tone

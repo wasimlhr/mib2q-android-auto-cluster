@@ -110,6 +110,8 @@ copy_required "$UNIT_ROOT/mnt/app/eso/bin/apps/gal" \
               "binaries/gal"
 copy_required "$UNIT_ROOT/mnt/app/eso/lib/libautoreceiver.so" \
               "binaries/libautoreceiver.so"
+copy_required "$UNIT_ROOT/mnt/app/armle/lib/dll/deva-ctrl-qc.so" \
+              "binaries/deva-ctrl-qc.so"
 copy_required "$UNIT_ROOT/ifs/lsd.jxe" \
               "binaries/lsd.jxe"
 copy_required "$UNIT_ROOT/mnt/system/etc/eso/production/smartphone_integrator.json" \
@@ -124,6 +126,7 @@ df -k "$CARD" > "$OUT/metadata/card_space.txt" 2>&1
 {
     ls -ln "$UNIT_ROOT/mnt/app/eso/bin/apps/gal"
     ls -ln "$UNIT_ROOT/mnt/app/eso/lib/libautoreceiver.so"
+    ls -ln "$UNIT_ROOT/mnt/app/armle/lib/dll/deva-ctrl-qc.so"
     ls -ln "$UNIT_ROOT/ifs/lsd.jxe"
     ls -ln "$UNIT_ROOT/mnt/system/etc/eso/production/smartphone_integrator.json"
     ls -ln "$UNIT_ROOT/mnt/system/etc/eso/production/gal.json"
@@ -134,7 +137,8 @@ df -k "$CARD" > "$OUT/metadata/card_space.txt" 2>&1
 if command -v cksum >/dev/null 2>&1; then
     {
         for SAVED in "$OUT/binaries/gal" "$OUT/binaries/libautoreceiver.so" \
-                     "$OUT/binaries/lsd.jxe" "$OUT/config/smartphone_integrator.json" \
+                     "$OUT/binaries/deva-ctrl-qc.so" "$OUT/binaries/lsd.jxe" \
+                     "$OUT/config/smartphone_integrator.json" \
                      "$OUT/config/gal.json"; do
             [ -f "$SAVED" ] && cksum "$SAVED"
         done
@@ -144,9 +148,20 @@ else
         > "$OUT/metadata/cksum.txt"
 fi
 
+# Optional helper built from tools/aa_qsa_caps.c. It only opens the Android Auto
+# media PCM and reads its capability record; it never configures or writes it.
+if [ -f "$SCRIPT_DIR/aa_qsa_caps" ] && [ -z "$UNIT_ROOT" ]; then
+    "$SCRIPT_DIR/aa_qsa_caps" mpl6_gal_ent > "$OUT/metadata/mpl6_qsa_caps.txt" 2>&1
+    QSA_RESULT=$?
+    echo "qsa_caps_result=$QSA_RESULT" >> "$MANIFEST"
+else
+    echo "qsa_caps_result=not-run" >> "$MANIFEST"
+    echo "aa_qsa_caps helper unavailable in this package" > "$OUT/metadata/mpl6_qsa_caps.txt"
+fi
+
 if [ "$FAILURES" -eq 0 ]; then
-    echo "COMPLETE: all 5 files copied and byte-compared successfully" > "$STATUS"
-    echo "COMPLETE: all 5 required files copied and verified."
+    echo "COMPLETE: all 6 files copied and byte-compared successfully" > "$STATUS"
+    echo "COMPLETE: all 6 required files copied and verified."
     echo "Return the folder: $OUT"
     sync
     exit 0

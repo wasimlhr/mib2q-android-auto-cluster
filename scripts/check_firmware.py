@@ -83,7 +83,7 @@ def evaluate(profile_path: Path, profile: dict[str, object], supplied: dict[str,
         result = "incomplete"
     elif profile.get("installable") is False:
         result = "java-port-ready"
-    elif exact_count == supplied_count and supplied_count == len(supplied):
+    elif exact_count == supplied_count and exact_count == len(expected_files):
         result = "validated-profile"
     elif exact_count == supplied_count:
         result = "java-build-compatible"
@@ -104,6 +104,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Identify supplied files against repository firmware profiles. Nothing is modified.")
     ap.add_argument("--gal", type=Path)
     ap.add_argument("--receiver", type=Path, help="path to libautoreceiver.so")
+    ap.add_argument("--deva", type=Path, help="path to armle deva-ctrl-qc.so")
     ap.add_argument("--lsd-jxe", type=Path)
     ap.add_argument("--stock-jar", type=Path, help="user-derived lsd.jar used for API checks")
     ap.add_argument("--compile-jar", type=Path, help="user-derived compile jar with InnerClasses restored")
@@ -115,6 +116,7 @@ def main() -> int:
     supplied = {
         "gal": args.gal,
         "libautoreceiver.so": args.receiver,
+        "deva-ctrl-qc.so": args.deva,
         "lsd.jxe": args.lsd_jxe,
         "stock_jar": args.stock_jar,
         "compile_jar": args.compile_jar,

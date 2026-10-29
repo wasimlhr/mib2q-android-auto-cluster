@@ -29,10 +29,10 @@ build(z)
 car_before = strings(z, "resources/HMICarEvoHigh/strings_ru_RU.data")[1]["resources/HMICarEvoHigh/strings_ru_RU.data"]
 assert upmix_lang.patch(z) == 0
 ru, raw = strings(z, "resources/HMIToneEvoHigh/strings_ru_RU.data")
-assert ru[1000:1006] == ["CarPlay UpMix", "vykl"] + upmix_lang.LEVELS["ru"], ru[1000:1006]
+assert ru[1000:1006] == ["Phone UpMix 5.1", "vykl"] + upmix_lang.LEVELS["ru"], ru[1000:1006]
 assert ru[897:1000] == [""] * 103 and ru[:897] == strings(z, "resources/HMIToneEvoHigh/strings_ru_RU.data")[0][:897]
 xx = strings(z, "resources/HMIToneEvoHigh/strings_xx_XX.data")[0]
-assert xx[1000:1006] == ["CarPlay UpMix", "Off"] + upmix_lang.LEVELS["en"]
+assert xx[1000:1006] == ["Phone UpMix 5.1", "Off"] + upmix_lang.LEVELS["en"]
 assert raw["resources/HMICarEvoHigh/strings_ru_RU.data"] == car_before
 once = open(z, "rb").read()
 assert upmix_lang.patch(z) == 0 and open(z, "rb").read() == once            # idempotent
@@ -43,4 +43,12 @@ s, fl = ldzip.d_unpack(raw[k]); s[1000] = "Other mod"; body = ldzip.d_pack(s, fl
 raw[k] = body; meta[k] = (0, ldzip.crc32(body), len(body))
 open(z, "wb").write(ldzip.zip_write(names, meta, raw))
 assert upmix_lang.patch(z) == 1 and strings(z, k)[0][1000] == "Other mod"
-print("upmix_lang_test: slots 1000..1005, stock Off, English fallback, other screens untouched, idempotent, foreign slots kept PASS")
+# M.I.B. MicroPython has os.rename but no os.replace.
+z2 = os.path.join(d, "lang_data_micropython.zip"); build(z2)
+replace = os.replace; delattr(os, "replace")
+try:
+    assert upmix_lang.patch(z2) == 0
+finally:
+    os.replace = replace
+assert strings(z2, "resources/HMIToneEvoHigh/strings_xx_XX.data")[0][1000] == "Phone UpMix 5.1"
+print("upmix_lang_test: slots 1000..1005, stock Off, English fallback, other screens untouched, idempotent, foreign slots kept, MicroPython rename fallback PASS")

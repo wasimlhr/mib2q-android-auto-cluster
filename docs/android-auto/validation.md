@@ -34,4 +34,16 @@ MU1316 P5145 development validation (not on-car installation approval):
 - installation remains blocked until exact `gal` and `libautoreceiver.so` fingerprints and native ABI
   validation are available.
 
+MU1201 P1201 development validation (not on-car installation approval):
+
+- all five collector files copied and byte-compared successfully;
+- exact `gal`, `libautoreceiver.so` and `lsd.jxe` fingerprints are profiled;
+- `libautoreceiver.so` is byte-identical to validated MU0918 and the MU1201 GAL-side guard addresses
+  were resolved from its own symbol table;
+- all 14 replaced stock outer classes are byte-identical to MU1316 P5145;
+- the profile-selected overlay passes every member/header gate and 162 host behavior assertions against
+  MU1201-derived stock and compile JARs;
+- installation remains blocked until one controlled on-car pilot verifies cockpit terminal/window
+  behavior on the Korean firmware.
+
 Personal drive logs, recorded navigation video and firmware files are intentionally excluded.

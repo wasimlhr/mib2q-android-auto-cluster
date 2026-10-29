@@ -8,7 +8,8 @@ Obtain these from a unit or firmware package you are entitled to use and keep th
 - `libautoreceiver.so`
 - `lsd.jxe`
 - a converted `lsd.jar` for fidelity/API checks
-- a compile form of the same JAR with `InnerClasses` restored, when the converter produces one
+- optionally, a compile form of the same JAR with `InnerClasses` restored; when omitted,
+  `scripts/build_android_auto_java.sh` creates a temporary compile-only copy automatically
 
 Run `scripts/check_firmware.py` before building. An exact match is required for the native hook. A JAR
 that merely contains the expected classes is useful for porting, but it is not install authorization.

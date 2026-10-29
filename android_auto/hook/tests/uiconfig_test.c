@@ -43,9 +43,9 @@ int main(void)
      * coordinates (run 117: the phone measures insets from the 1920x1080 frame) = preset + (240 x, 270 y) */
     vp_mode = 1;
     {
-        /* run 149: the owner's map-zoom step -1 baked into all three presets */
-        static const unsigned char want_s[] = { 0x08, V2(78 + 270), 0x10, V2(146 + 270), 0x18, V2(484 + 240),
-                                                0x20, V2(394 + 240), 0x20, 2 };
+        /* L/C use the run-149 defaults; Sport uses the run-168 visible-window bounds. */
+        static const unsigned char want_s[] = { 0x08, V2(78 + 270), 0x10, V2(146 + 270), 0x18, V2(476 + 240),
+                                                0x20, V2(484 + 240), 0x20, 2 };
         static const unsigned char want_c[] = { 0x08, V2(97 + 270), 0x10, V2(167 + 270), 0x18, V2(510 + 240),
                                                 0x20, V2(510 + 240), 0x20, 2 };
         static const unsigned char want_l[] = { 0x08, V2(97 + 270), 0x10, V2(167 + 270), 0x18, V2(350 + 240),
@@ -64,14 +64,14 @@ int main(void)
         assert(l == 590 && r == 610 && t < t0 && b < b0 && (1080 - b) - t > (1080 - b0 - t0) * 110 / 100);
         assert((int)t0 - (int)t - ((int)b0 - (int)b) <= 1 && (int)t0 - (int)t - ((int)b0 - (int)b) >= -1);
     }
-    /* run 149: L/C presets = the old ones at map-zoom step -1; run 153: Sport = the original at step +3 */
+    /* run 149: the Large preset is the old one at map-zoom step -1. Sport's run-168 preset is an
+     * independently measured visible-window bound, so its exact default is checked above rather than
+     * pretending it is still derived from the obsolete run-153 roller setting. */
     {
         uint32_t t = 77 + 270, b = 146 + 270, l = 350 + 240, r = 370 + 240;
         mz_step = -1; mz_apply(&t, &b, &l, &r, 0);
         assert(t == vp_preset[0][0] + VP_OY && b == vp_preset[0][1] + VP_OY && l == vp_preset[0][2] + VP_OX && r == vp_preset[0][3] + VP_OX);
-        t = 78 + 270; b = 146 + 270; l = 580 + 240; r = 490 + 240;
-        mz_step = 3; mz_apply(&t, &b, &l, &r, 2); mz_step = 0;   /* run 153: Sport = the original at step +3 */
-        assert(t == vp_preset[2][0] + VP_OY && b == vp_preset[2][1] + VP_OY && l == vp_preset[2][2] + VP_OX && r == vp_preset[2][3] + VP_OX);
+        mz_step = 0;
     }
     /* Sport step -2: only the width shrinks, around its centre */
     {

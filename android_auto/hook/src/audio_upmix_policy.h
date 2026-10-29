@@ -25,6 +25,33 @@ struct sq5_aa_pcm_caps {
     size_t max_fragment_bytes;
 };
 
+/* GAL may seed params with the physical device's maximum fragment size even
+ * though its requested format is still stereo. A six-channel sink cannot
+ * accept that many stereo frames after expansion. Select the largest
+ * frame-aligned stereo period whose 2 -> 6 expansion fits the sink, while
+ * retaining the caller's smaller request unchanged. */
+static size_t sq5_aa_upmix_select_source_fragment(size_t requested_bytes,
+                                                   const struct sq5_aa_pcm_caps *caps)
+{
+    const size_t source_frame =
+        SQ5_AA_UPMIX_SOURCE_CHANNELS * SQ5_AA_UPMIX_SAMPLE_BYTES;
+    const size_t target_frame =
+        SQ5_AA_UPMIX_TARGET_CHANNELS * SQ5_AA_UPMIX_SAMPLE_BYTES;
+    size_t requested_frames, max_frames;
+
+    if (!caps || caps->max_channels < SQ5_AA_UPMIX_TARGET_CHANNELS ||
+        !requested_bytes || requested_bytes % source_frame ||
+        caps->max_fragment_bytes < target_frame)
+        return 0;
+    requested_frames = requested_bytes / source_frame;
+    max_frames = caps->max_fragment_bytes / target_frame;
+    if (max_frames > SQ5_AA_UPMIX_MAX_FRAMES)
+        max_frames = SQ5_AA_UPMIX_MAX_FRAMES;
+    if (requested_frames > max_frames)
+        requested_frames = max_frames;
+    return requested_frames ? requested_frames * source_frame : 0;
+}
+
 static int sq5_aa_upmix_plan(const struct sq5_aa_pcm_geometry *source,
                              const struct sq5_aa_pcm_caps *caps,
                              struct sq5_aa_pcm_geometry *target)

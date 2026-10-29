@@ -1,13 +1,14 @@
 # Read-only MHI2Q firmware collector
 
 This M.I.B. package collects the exact files needed to add or verify an Audi MHI2Q Android Auto
-firmware profile. It **does not install anything and does not change the head unit**. It reads five
+firmware profile. It **does not install anything and does not change the head unit**. It reads six
 files from MMX, writes them to the SD card, and byte-compares every saved copy with its source.
 
 ## Files collected
 
 - `/mnt/app/eso/bin/apps/gal`
 - `/mnt/app/eso/lib/libautoreceiver.so`
+- `/mnt/app/armle/lib/dll/deva-ctrl-qc.so`
 - `/ifs/lsd.jxe`
 - `/mnt/system/etc/eso/production/smartphone_integrator.json`
 - `/mnt/system/etc/eso/production/gal.json`
@@ -18,7 +19,7 @@ files from MMX, writes them to the SD card, and byte-compares every saved copy w
    M.I.B. SD card.
 2. Insert the card in the car.
 3. Open **GEM → M.I.B. → Advanced settings → Run custom script** and select this package if prompted.
-4. Wait for `COMPLETE: all 5 required files copied and verified` before removing the card.
+4. Wait for `COMPLETE: all 6 required files copied and verified` before removing the card.
 5. On the card, send back the newest numbered folder under
    `android_auto_firmware_backup/`—for example `android_auto_firmware_backup/001`.
 
@@ -29,3 +30,7 @@ starting with `COMPLETE`.
 `lsd.jxe` is approximately 60 MB, so keep at least 100 MB free on the card. The collected firmware
 binaries should be shared privately with the developer and should not be committed to a public Git
 repository.
+
+When the optional `aa_qsa_caps` helper is present, the same run records the read-only
+`mpl6_gal_ent` voice, rate, format and fragment capabilities. The helper does not submit audio
+parameters or samples.

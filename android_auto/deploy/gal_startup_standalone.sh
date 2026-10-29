@@ -1,6 +1,11 @@
 #!/bin/sh
 # Standalone Android Auto GAL launcher. smartphone_integrator supervises this PID.
-set -u
+# MU1201 starts GAL with no positional arguments.  Its QNX ksh treats $* and
+# $@ as unset under nounset, so keep positional expansion valid for that stock
+# launch contract.
+set +u
+PATH=/proc/boot:/bin:/usr/bin:/usr/sbin:/sbin:/mnt/app/armle/bin:/mnt/app/armle/usr/bin
+export PATH
 BASE=/mnt/app/root/sq5_android_auto
 GAL=/mnt/app/eso/bin/apps/gal
 LOG=/tmp/mib2q_aa_startup.log

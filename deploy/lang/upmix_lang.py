@@ -4,7 +4,7 @@
 #
 #   micropython upmix_lang.py /mnt/app/eso/hmi/lsd/jars/lang_data.zip
 #
-# Puts six strings - the label "CarPlay UpMix" and the five levels - into the fixed
+# Puts six strings - the shared phone 5.1 upmix label and the five levels - into the fixed
 # slots SLOT..SLOT+5 of every HMIToneEvoHigh locale table (text ids
 # 1001000..1001005, what the Java row uses: com/luka/carplay/tone/
 # UpmixToneUi.java); the table is padded with empty strings up to there.  A
@@ -19,8 +19,8 @@ sys.path.append(here)
 import ldzip
 
 SCREEN = "HMIToneEvoHigh"
-LABEL = "CarPlay UpMix"
-OUR_LABELS = (LABEL, "UpMix")   # any wording we ever wrote: rewritten, not "taken"
+LABEL = "Phone UpMix 5.1"
+OUR_LABELS = (LABEL, "CarPlay UpMix", "Android Auto UpMix", "UpMix")
 SLOT = 1000          # past the stock table (897 slots on US/EU/CN); text id = 1000000 + slot
 # The four levels after Off, per language (locale first, then its language):
 # every HMIToneEvoHigh locale of the US (MU1316), EU (MU1329) and CN (MU1003)
@@ -81,7 +81,9 @@ def zip_write_to(f, names, meta, raw):
             + struct.pack("<I", clen) + struct.pack("<I", off) + struct.pack("<H", 0))
 
 def patch(zp):
-    names, meta, raw = ldzip.zip_read(open(zp, "rb").read())
+    with open(zp, "rb") as source:
+        archive = source.read()
+    names, meta, raw = ldzip.zip_read(archive)
     pre = "resources/%s/strings_" % SCREEN
     added = present = taken = 0
     for n in names:
@@ -112,7 +114,17 @@ def patch(zp):
     if added:
         tmp = zp + ".carplay-new"
         f = open(tmp, "wb"); zip_write_to(f, names, meta, raw); f.close()
-        os.rename(tmp, zp)
+        # QNX M.I.B. MicroPython has os.rename(), but not CPython's
+        # os.replace().  This is only the installer's private work copy; the
+        # shell wrapper separately stages and verifies the real lang_data.zip.
+        try:
+            os.replace(tmp, zp)
+        except AttributeError:
+            try:
+                os.remove(zp)
+            except OSError:
+                pass
+            os.rename(tmp, zp)
     print("UpMix texts: added to %d locale(s), already in %d, slots taken in %d" % (added, present, taken))
     return 1 if taken else 0
 

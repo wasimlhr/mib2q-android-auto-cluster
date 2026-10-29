@@ -28,6 +28,9 @@ cc -std=c99 -O2 -Wall -Wextra -Werror -pedantic -I. \
     tests/android_auto_upmix_policy_test.c -o "$OUT/aa_upmix_policy"
 "$OUT/aa_upmix_policy"
 
+printf '%-32s ' deva_mpl6_patch_test
+python3 -I tests/deva_mpl6_patch_test.py
+
 printf '%-32s ' android_auto_upmix_interposer_test
 cc -std=gnu99 -O1 -g -Wall -Wextra -Werror \
     -Wno-unused-function -Wno-unused-parameter -Itests/mocks -Ihook \

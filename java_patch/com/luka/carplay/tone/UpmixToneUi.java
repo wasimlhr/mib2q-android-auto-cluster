@@ -1,5 +1,5 @@
 /*
- * "CarPlay UpMix" row on Sound -> Sound effects (tone screen 1000006).
+ * Shared "Phone UpMix 5.1" row on Sound -> Sound effects (tone screen 1000006).
  *
  * Model: ChoiceModel 1000162 = tone module 10, index 162 (stock bank has 0..161). It lives in the
  * stock ToneModelBank instance (subclass below), so HMIRegistry/ModelConnectService resolve it like

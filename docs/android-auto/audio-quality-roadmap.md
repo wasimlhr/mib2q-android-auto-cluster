@@ -19,13 +19,14 @@ not from an MP3-style encoder. A 24-bit or 96/192 kHz source is not delivered bi
 
 ## Track A: compatible surround path
 
-**Implementation status (2026-10-27): host-validated, car probe pending.** The GAL preload now contains
+**Implementation status (2026-10-27): host-validated; stock car probe complete; activation pending.** The GAL preload now contains
 an opt-in `mpl6_gal_ent` PCM interposer. It keeps Android Auto's standard 48 kHz/S16/stereo negotiation,
 reuses the SCENE stereo-to-5.1 renderer, and exposes probe/on controls through SD-card markers. The
-interposer is fail-closed: stock MU0918 advertises only two voices and a 3072-byte period, so it logs
-the limitation and leaves the caller's stereo request unchanged. It activates only after the exact
-firmware's QSA device reports six voices and a 9216-byte S16 period. The required MPL6 driver capability
-port is intentionally not installed from unverified offsets. See
+interposer is fail-closed: the collected stock MU0918 endpoint advertises exactly two voices and a
+3072-byte period, so it logs the limitation and leaves the caller's stereo request unchanged. The exact
+MU0918 driver is now fingerprinted and its MPL6 record has a deterministic, six-byte, hash-gated patch
+to six voices and a 9216-byte S16 period. That output is not installed yet; QSA-harness validation and
+a reversible on-car activation run remain. See
 [Android Auto upmix validation](audio-upmix-validation.md).
 
 Keep the standard Android Auto PCM negotiation so every supported phone continues to connect, then:
@@ -35,8 +36,9 @@ Keep the standard Android Auto PCM negotiation so every supported phone continue
 3. Reuse the audited stereo-to-5.1 engine and six-channel QSA/CSD route.
 4. Use the receiver's S16 QSA boundary without an additional encode; any later 24-bit output-container
    path must be measured separately and must not be described as restoring discarded source bits.
-5. Add an `Android Auto UpMix` MMI control with Off and bounded intensity levels after the SD-marker
-   experiment is proven on-car.
+5. Use the shared `Phone UpMix 5.1` MMI control for both CarPlay and Android Auto, with Off and four
+   bounded intensity levels. Android Auto applies changes live from the existing persisted level file;
+   audible activation remains gated on the firmware-exact MPL6 driver profile.
 
 This improves spatial presentation and uses the B&O system's discrete channels, but it must be labelled
 **car-side upmix**, not native Dolby Atmos or restored high-resolution audio.

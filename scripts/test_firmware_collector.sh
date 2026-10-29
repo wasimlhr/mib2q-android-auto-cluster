@@ -10,12 +10,14 @@ fail() { echo "FAIL: $1"; exit 1; }
 
 UNIT=$T/unit
 CARD=$T/card
-mkdir -p "$UNIT/mnt/app/eso/bin/apps" "$UNIT/mnt/app/eso/lib" "$UNIT/ifs" \
+mkdir -p "$UNIT/mnt/app/eso/bin/apps" "$UNIT/mnt/app/eso/lib" \
+         "$UNIT/mnt/app/armle/lib/dll" "$UNIT/ifs" \
          "$UNIT/mnt/system/etc/eso/production" "$CARD"
 cp -R "$ROOT/collect_AndroidAutoFirmware_MoreIncredibleBash/mod" "$CARD/"
 
 printf 'gal-binary\000payload\n' > "$UNIT/mnt/app/eso/bin/apps/gal"
 printf 'receiver-binary\000payload\n' > "$UNIT/mnt/app/eso/lib/libautoreceiver.so"
+printf 'deva-binary\000payload\n' > "$UNIT/mnt/app/armle/lib/dll/deva-ctrl-qc.so"
 printf 'jxe-binary\000payload\n' > "$UNIT/ifs/lsd.jxe"
 printf '{"children":{"gal":{}}}\n' > "$UNIT/mnt/system/etc/eso/production/smartphone_integrator.json"
 printf '{"video":{"sink":{}}}\n' > "$UNIT/mnt/system/etc/eso/production/gal.json"
@@ -33,6 +35,8 @@ cmp -s "$UNIT/mnt/app/eso/bin/apps/gal" "$OUT/binaries/gal" \
     || fail "gal differs"
 cmp -s "$UNIT/mnt/app/eso/lib/libautoreceiver.so" "$OUT/binaries/libautoreceiver.so" \
     || fail "libautoreceiver differs"
+cmp -s "$UNIT/mnt/app/armle/lib/dll/deva-ctrl-qc.so" "$OUT/binaries/deva-ctrl-qc.so" \
+    || fail "deva-ctrl-qc differs"
 cmp -s "$UNIT/ifs/lsd.jxe" "$OUT/binaries/lsd.jxe" \
     || fail "lsd.jxe differs"
 grep -q '^OK|.*/mnt/app/eso/bin/apps/gal|binaries/gal|' "$OUT/manifest.txt" \

@@ -90,6 +90,7 @@ def main() -> int:
         "libsq5_cluster_live.so": native / "libsq5_cluster_live.so",
         "cluster-player": native / "cluster-player",
         "config_tool": native / "config_tool",
+        "gal_launcher": native / "gal_launcher",
         "maneuver_render": ROOT / "build/maneuver_render",
         "flag_atlas.rgba": ROOT / "maneuver_render/resources/flag_atlas.rgba",
         "scene_masknet_c.bin": ROOT / "models/scene-masknet-c/scene_masknet_c.bin",

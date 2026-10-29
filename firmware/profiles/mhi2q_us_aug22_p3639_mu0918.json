@@ -14,6 +14,10 @@
       "sha256": "6ef4abea8264ab7787b0ecb3fe278a65488301f703148d0175010f7b228bdaf6",
       "posix_cksum": 1653920605
     },
+    "deva-ctrl-qc.so": {
+      "size": 690332,
+      "sha256": "5cc4c61e2e3a771dd21ff000ae1cd12eebebfa006bd7879df93f30b3b1fc0c63"
+    },
     "lsd.jxe": {
       "size": 59183739,
       "sha256": "62891a9b72ad86be709dfa8cfdfffb69ba5ad9b732850289eb07bc091ec4b7d0",

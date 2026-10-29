@@ -2,7 +2,9 @@
 
 The repository uses a shared implementation with profile-selected Java overrides and exact native
 fingerprints. MU0918 is installable. MU1316 P5145 already has its four differing Java classes ported,
-but its native gate remains intentionally incomplete.
+but its native gate remains intentionally incomplete. MU1201 P1201 has exact native fingerprints, a
+reviewed GAL guard and a host-verified Java port that reuses the byte-identical MU1316 replaced classes;
+it remains non-installable until its first controlled on-car cockpit/display pilot.
 
 This profile model is how the mod covers additional Audi MHI2Q firmware over time. Once a version's
 exact files, native ABI, Java seams and on-car behavior are verified, it becomes another supported
@@ -30,6 +32,10 @@ First compare all 13 replaced classes with the nearest profile. Put only differi
 under `android_auto/java/firmware/<profile-id>/src` at their normal package paths. The MU1316 P5145
 profile needs four overrides: `ClusterService`, `DisplayManagerMIB2High`, `ExternalEventsListener` and
 `PartialPopupManagerEvoHigh`.
+
+When every replaced outer class is byte-identical to an existing profile, set `java_source_profile` in
+the new profile instead of copying those sources. MU1201 uses the MU1316 Java source profile this way;
+the build still runs its member/header gates against the MU1201 stock JAR.
 
 Regenerate these Android Auto seams from the user's firmware only when they differ:
 

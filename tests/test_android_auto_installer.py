@@ -16,7 +16,7 @@ from scripts.stage_android_auto import cksum
 INSTALLER = REPO / "install_AndroidAuto_MoreIncredibleBash" / "mod" / "custom.sh"
 COMMON_PAYLOADS = (
     "libsq5_cluster_live.so", "cluster-player", "maneuver_render", "flag_atlas.rgba", "scene_masknet_c.bin",
-    "gal_startup.sh", "sq5_luka_monitor.sh", "sq5_luka_processes.sh", "sq5_luka_cleanup.sh",
+    "gal_launcher", "gal_startup.sh", "sq5_luka_monitor.sh", "sq5_luka_processes.sh", "sq5_luka_cleanup.sh",
     "config_tool", "profiles.list",
 )
 JAR = "mib2q_android_auto_cluster.jar"
@@ -109,12 +109,12 @@ def main():
             "#!/bin/sh\ncmd=$1; file=$2; key=${3:-}\n"
             "if [ \"$cmd\" = get ]; then\n"
             "  if grep -q sq5_android_auto \"$file\"; then\n"
-            "    [ \"$key\" = exec ] && echo gal_startup.sh || echo /mnt/app/root/sq5_android_auto\n"
+            "    [ \"$key\" = exec ] && echo gal_launcher || echo /mnt/app/root/sq5_android_auto\n"
             "  else\n"
             "    [ \"$key\" = exec ] && echo gal || echo /mnt/app/eso/bin/apps\n"
             "  fi\n"
             "elif [ \"$cmd\" = patch ]; then\n"
-            "  echo '{\"children\":{\"gal\":{\"exec\":\"gal_startup.sh\",\"path\":\"/mnt/app/root/sq5_android_auto\"}}}'\n"
+            "  echo '{\"children\":{\"gal\":{\"exec\":\"gal_launcher\",\"path\":\"/mnt/app/root/sq5_android_auto\"}}}'\n"
             "else exit 2; fi\n", encoding="ascii",
         )
         config_tool.chmod(0o755)

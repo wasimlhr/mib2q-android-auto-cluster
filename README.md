@@ -22,7 +22,10 @@
 > The ready installation profile is validated specifically on `MHI2Q_US_AUG22_P3639` **MU0918**.
 > `MHI2Q_US_AUG22_P5145` **MU1316** is recognized and its firmware-specific Java overlay is implemented
 > and API-gated, but installation remains blocked until exact `gal` and `libautoreceiver.so` copies are
-> captured and their native ABI is verified. Make a complete M.I.B. backup before modifying a head unit.
+> captured and their native ABI is verified. `MHI2Q_KR_AUG22_P1201` **MU1201** now has exact native
+> fingerprints, a reviewed GAL guard and a passing Java port, but remains blocked for installation until
+> its first on-car pilot confirms the Korean cockpit/display integration. Make a complete M.I.B. backup
+> before modifying a head unit.
 
 > [!NOTE]
 > **Firmware support is profile-based and expands as versions are verified.** This is not permanently
@@ -225,7 +228,7 @@ installer never deploys the CarPlay hook.
 | --- | --- | --- |
 | `MHI2Q_US_AUG22_P3639` MU0918 | **Validated on the car; ready profile included** | Build with the owner's matching firmware JARs, stage and install |
 | `MHI2Q_US_AUG22_P5145` MU1316 | **Java port compiled and API-gated; installer recognizes but blocks it** | Capture exact `gal` and `libautoreceiver.so`, audit native ABI, add their hashes, then validate on-car |
-| `MHI2Q_KR_AUG22_P1201` MU1201 | **Read-only collector completed successfully; no install profile yet** | Privately review the collected files, port the firmware seams and validate on-car |
+| `MHI2Q_KR_AUG22_P1201` MU1201 | **Exact native profile and Java port completed; installer recognizes but blocks it** | Run the read-only card audit, then complete one controlled on-car pilot before promotion to installable |
 | Other Audi MHI2Q releases | **Framework-compatible; profile verification required** | Verify native/Java seams, add hashes and test on that firmware |
 
 ### Already reusable across ports
@@ -285,9 +288,12 @@ once, then run:
 ./scripts/build_renderers.sh
 ./scripts/build_android_auto_java.sh \
   --stock-jar /private/path/lsd.jar \
-  --compile-jar /private/path/lsd_ic.jar
+  --profile mhi2q_us_aug22_p3639_mu0918
 python scripts/stage_android_auto.py
 ```
+
+`--compile-jar` is optional. When omitted, the build creates a deterministic temporary copy of the
+stock JAR with the converter's missing `InnerClasses` metadata restored; that copy is never shipped.
 
 The Java builder identifies the profile from the supplied JARs and writes its result under
 `build/android_auto/profiles/<profile-id>/`. To make one card containing multiple completed profiles,

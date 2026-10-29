@@ -318,7 +318,8 @@ void _ZN13MessageRouter12routeMessageEhRK10shared_ptrI8IoBufferE(void *r,unsigne
 __attribute__((constructor)) static void init(void)
 {
     char path[256];
-    uintptr_t base;
+    uintptr_t base,gal_controller,gal_video_vtable;
+    const char *profile="unsupported";
     const char *opt=getenv("SQ5_CLUSTER_PROBE");
     snprintf(path,sizeof(path),"/tmp/sq5_cluster_probe/probe-%ld.log",(long)getpid());
     logfile=fopen(path,"a");
@@ -339,15 +340,23 @@ __attribute__((constructor)) static void init(void)
     RES(base_vtable,"_ZTV20ProtocolEndpointBase");
 #undef RES
     base=(uintptr_t)real_register-0xe4928;
+    gal_controller=(uintptr_t)dlsym(RTLD_DEFAULT,"_ZN3gal14CGALController10s_instanceE");
+    gal_video_vtable=(uintptr_t)dlsym(RTLD_DEFAULT,"_ZTVN3gal14CVideoSinkImplE");
+    if(gal_controller==0x2544a0 && gal_video_vtable==0x24dfb8)
+        profile="MU0918";
+    else if(gal_controller==0x259598 && gal_video_vtable==0x252b40)
+        profile="MU1201";
+    else if(gal_controller==0x258580 && gal_video_vtable==0x251b28)
+        profile="MU1316";
     enabled=opt && !strcmp(opt,"1") && real_register && real_config && real_discovery &&
         real_input_discovery && send_config && set_focus && ack_frames && real_open &&
         real_route && queue_plain && queue_encrypted && real_version && sink_vtable && base_vtable &&
-        (uintptr_t)dlsym(RTLD_DEFAULT,"_ZN3gal14CGALController10s_instanceE")==0x2544a0 &&
-        (uintptr_t)dlsym(RTLD_DEFAULT,"_ZTVN3gal14CVideoSinkImplE")==0x24dfb8 &&
+        strcmp(profile,"unsupported") &&
         (uintptr_t)sink_vtable==base+0x102b90 && (uintptr_t)base_vtable==base+0x102af0 && (uintptr_t)real_config==base+0xfafc4 &&
         (uintptr_t)send_config==base+0xec748 && (uintptr_t)set_focus==base+0xfa978 &&
         (uintptr_t)ack_frames==base+0xec294;
-    probe_log("probe.init build=sq5-cluster-probe-v1 enabled=%d profile=MU0918 capture_only=1",enabled);
+    probe_log("probe.init build=sq5-cluster-probe-v1 enabled=%d profile=%s gal_controller=0x%lx gal_video_vtable=0x%lx capture_only=1",
+              enabled,profile,(unsigned long)gal_controller,(unsigned long)gal_video_vtable);
     if(enabled && capture_init("/tmp/sq5_cluster_probe")!=0) {
         enabled=0; probe_log("probe.disabled reason=capture_initialization");
     }
