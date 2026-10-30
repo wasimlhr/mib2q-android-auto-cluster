@@ -33,12 +33,17 @@ done
 
 # Android Auto media surround is deliberately opt-in.  Probe mode logs the
 # stock mpl6_gal_ent QSA limits but cannot change its format.  Active mode is
-# still fail-closed inside the hook: unless QSA advertises an exact 48 kHz,
-# S16, six-channel period it passes GAL's original stereo parameters through.
+# still fail-closed inside the hook: unless the mpl6 record shows six voices
+# in a known format it passes GAL's original stereo parameters through.
+# aa_upmix_enabled is written by the 5.1 driver package, so the upmix follows
+# the installed six-channel driver without a card; sq5_aa_upmix_off on the
+# card forces stock stereo for one boot.
 unset SQ5_AA_UPMIX SQ5_AA_UPMIX_MASK SQ5_AA_UPMIX_LEVEL
-if sd_flag sq5_aa_upmix_probe; then
+if sd_flag sq5_aa_upmix_off; then
+    echo "sq5_aa_upmix_off -> stock Android Auto stereo request" >> "$LOG"
+elif sd_flag sq5_aa_upmix_probe; then
     export SQ5_AA_UPMIX=probe
-elif sd_flag sq5_aa_upmix; then
+elif sd_flag sq5_aa_upmix || [ -f "$BASE/aa_upmix_enabled" ]; then
     [ -r "$BASE/scene_masknet_c.bin" ] || fallback "missing scene_masknet_c.bin" "$@"
     export SQ5_AA_UPMIX=on
     export SQ5_AA_UPMIX_MASK=$BASE/scene_masknet_c.bin
